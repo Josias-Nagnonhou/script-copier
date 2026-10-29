@@ -13,7 +13,25 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or uuid.uuid4().hex
 
-GROQ_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+def find_groq_key():
+    """Trouve la clé Groq même si le nom de la variable est mal écrit
+    (espaces, minuscules, guillemets) ou si la clé a été collée ailleurs."""
+    def clean(v):
+        return (v or "").strip().strip('"').strip("'").strip()
+    for k, v in os.environ.items():
+        if "GROQ" in k.strip().upper() and clean(v):
+            return clean(v)
+    for k, v in os.environ.items():
+        if clean(v).startswith("gsk_"):
+            return clean(v)
+        if clean(k).startswith("gsk_"):  # clé collée dans la case du nom
+            return clean(k)
+    return ""
+
+
+GROQ_KEY = find_groq_key()
+print("Clé Groq :", "trouvée" if GROQ_KEY else "ABSENTE", "| variables :",
+      sorted(k for k in os.environ if k.isupper() and not k.startswith(("RENDER", "PYTHON", "PATH", "HOME", "LANG", "GPG", "HOSTNAME"))), flush=True)
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "whisper-large-v3-turbo")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
 WORKERS = int(os.environ.get("WORKERS", "3"))

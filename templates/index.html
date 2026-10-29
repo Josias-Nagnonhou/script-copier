@@ -41,6 +41,14 @@ label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0 0
 input,select{width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:var(--soft);color:var(--ink);font:600 15px var(--body);min-width:0}
 #source{border:2px solid var(--ink);background:var(--card);font-size:16px;padding:14px 16px}
 input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
+.num{margin-top:14px}
+.numrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#limit{width:110px;flex:none;font:800 18px var(--body);text-align:center;font-variant-numeric:tabular-nums}
+#limit.all{color:var(--muted);font-size:15px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;min-width:0}
+.chips button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 13px;border-radius:99px;font:700 14px var(--body);cursor:pointer}
+.chips button.on{background:var(--ink);color:var(--on-ink);border-color:var(--ink)}
+.numerr{color:var(--err);font-size:13px;font-weight:600;margin:6px 0 0}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:14px}
 .go{width:100%;margin-top:18px;padding:16px;border:0;border-radius:14px;background:#111;color:var(--lime);font:800 17px var(--body);cursor:pointer;position:relative;overflow:hidden;transition:transform .15s}
 .go:hover{transform:translateY(-1px)}
@@ -103,9 +111,17 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
       </div>
       <label for="source">Nom du compte ou lien</label>
       <input id="source" placeholder="@nomducompte ou https://www.tiktok.com/@..." autocomplete="off">
+      <div class="num">
+        <label for="limit">Nombre de vidéos</label>
+        <div class="numrow">
+          <input id="limit" type="number" inputmode="numeric" min="1" max="1000" step="1" value="50" aria-describedby="limitErr">
+          <div class="chips" id="chips">
+            <button type="button" data-v="10">10</button><button type="button" data-v="25">25</button><button type="button" data-v="50" class="on">50</button><button type="button" data-v="100">100</button><button type="button" data-v="all">Toutes</button>
+          </div>
+        </div>
+        <p class="numerr" id="limitErr" hidden>Mets un nombre entre 1 et 1000, ou choisis « Toutes ».</p>
+      </div>
       <div class="grid">
-        <div><label for="limit">Nombre</label>
-          <select id="limit"><option value="10">10</option><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="200">200</option><option value="0">Toutes</option></select></div>
         <div><label for="sort">Lesquelles</label>
           <select id="sort"><option value="recent">Plus récentes</option><option value="popular">Plus vues</option></select></div>
         <div><label for="lang">Langue</label>
@@ -145,14 +161,28 @@ document.querySelectorAll('#plat button').forEach(b=>b.onclick=()=>{
   $('#tabBox').hidden=platform!=='youtube';
   $('#source').placeholder=platform==='tiktok'?'@nomducompte ou https://www.tiktok.com/@...':'@nomdelachaine ou https://www.youtube.com/@...';
 });
+const lim=$('#limit');
+function markChip(v){document.querySelectorAll('#chips button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
+document.querySelectorAll('#chips button').forEach(b=>b.onclick=()=>{
+  $('#limitErr').hidden=true;
+  if(b.dataset.v==='all'){lim.classList.add('all');lim.value='';lim.placeholder='Toutes'}
+  else{lim.classList.remove('all');lim.placeholder='';lim.value=b.dataset.v}
+  markChip(b.dataset.v);
+});
+lim.oninput=()=>{$('#limitErr').hidden=true;lim.classList.remove('all');lim.placeholder='';markChip(lim.value)};
 function busy(on){$('#go').classList.toggle('busy',on);$('#go').textContent=on?'Kopi travaille…':'Copier les scripts →';$('#bar').classList.toggle('live',on)}
 function setActs(on){['#dl','#copy'].forEach(s=>$(s).setAttribute('aria-disabled',on?'false':'true'))}
 $('#go').onclick=async()=>{
   if($('#go').classList.contains('busy'))return;
   const source=$('#source').value.trim();if(!source){$('#source').focus();return}
+  let limit=0;
+  if(!$('#limit').classList.contains('all')){
+    limit=parseInt($('#limit').value,10);
+    if(!(limit>=1&&limit<=1000)){$('#limitErr').hidden=false;$('#limit').focus();return}
+  }
   busy(true);setActs(false);
   try{
-    const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform,source,limit:$('#limit').value,sort:$('#sort').value,lang:$('#lang').value,yt_tab:$('#tab').value})});
+    const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform,source,limit,sort:$('#sort').value,lang:$('#lang').value,yt_tab:$('#tab').value})});
     const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');
     try{localStorage.setItem('job',d.job_id)}catch(e){}
     watch(d.job_id);

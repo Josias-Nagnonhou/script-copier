@@ -34,7 +34,7 @@ print("Clé Groq :", "trouvée" if GROQ_KEY else "ABSENTE", "| variables :",
       sorted(k for k in os.environ if k.isupper() and not k.startswith(("RENDER", "PYTHON", "PATH", "HOME", "LANG", "GPG", "HOSTNAME"))), flush=True)
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "whisper-large-v3-turbo")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
-WORKERS = int(os.environ.get("WORKERS", "3"))
+WORKERS = int(os.environ.get("WORKERS", "1"))  # serveur gratuit : 512 Mo, une vidéo à la fois
 BASE = os.path.join(tempfile.gettempdir(), "script-copier")
 os.makedirs(BASE, exist_ok=True)
 

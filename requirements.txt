@@ -1,0 +1,5 @@
+flask>=3.0
+gunicorn>=22.0
+requests>=2.31
+python-docx>=1.1
+yt-dlp[default]

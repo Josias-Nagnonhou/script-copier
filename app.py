@@ -425,6 +425,11 @@ def job_docx(jid):
     return send_file(j["file"], as_attachment=True, download_name=j["filename"])
 
 
+@app.get("/favicon.ico")
+def favicon():
+    return send_file(os.path.join(app.root_path, "static", "favicon.ico"), mimetype="image/x-icon")
+
+
 @app.get("/health")
 def health():
     return "ok"

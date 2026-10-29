@@ -490,6 +490,14 @@ def cookies_upload():
         return jsonify(error="Non connecté"), 401
     f = request.files.get("file")
     text = f.read().decode("utf-8", "ignore") if f else (request.form.get("text") or "")
+    lines = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+    domains = sorted({l.split("\t")[0] for l in lines if "\t" in l})[:8]
+    print(f"Dépôt cookies : {len(text)} caractères, {len(lines)} lignes, domaines {domains}, "
+          f"1re ligne : {text[:40]!r}", flush=True)
+    if text.lstrip().startswith(("[", "{")):
+        return jsonify(error="Ce fichier est au format JSON. Dans l'extension, choisis le format « Netscape » puis refais Export."), 400
+    if lines and not any("youtube.com" in l for l in lines):
+        return jsonify(error="Ce fichier ne contient pas de cookies YouTube : fais l'export en étant sur youtube.com."), 400
     if not valid_yt_cookies(text):
         return jsonify(error="Ce fichier ne contient pas de cookies YouTube. Exporte-le depuis youtube.com avec l'extension."), 400
     install_yt_cookies(text, "upload")

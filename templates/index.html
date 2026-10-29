@@ -41,6 +41,19 @@ label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0 0
 input,select{width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:var(--soft);color:var(--ink);font:600 15px var(--body);min-width:0}
 #source{border:2px solid var(--ink);background:var(--card);font-size:16px;padding:14px 16px}
 input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
+button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
+.ytpanel{margin-bottom:18px}
+.ythead{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.ythead h2{font:800 22px var(--display);letter-spacing:-.02em;margin:0}
+.ytlead{color:var(--muted);margin:6px 0 10px;max-width:62ch}
+.steps{margin:0 0 14px;padding-left:20px;display:grid;gap:4px;font-weight:600}
+.drop{display:grid;place-items:center;gap:2px;text-align:center;border:2px dashed var(--line);border-radius:16px;padding:22px;cursor:pointer;background:var(--soft);margin:0;color:var(--ink);font-size:15px;letter-spacing:0}
+.drop:hover,.drop.over{border-color:var(--ink)}
+.drop input{position:absolute;opacity:0;width:1px;height:1px}
+.drop small{color:var(--muted);font-weight:500}
+.ytmsg{margin:10px 0 0;font-weight:700;min-height:1.2em}
+.ytmsg.ok{color:var(--ok)}.ytmsg.bad{color:var(--err)}
+.ytnote{color:var(--muted);font-size:13px;margin:8px 0 0}
 .num{margin-top:14px}
 .numrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 #limit{width:110px;flex:none;font:800 18px var(--body);text-align:center;font-variant-numeric:tabular-nums}
@@ -96,9 +109,27 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
     <p class="logo"><em>K</em>Kopi</p>
     <div class="right">
       {% if groq %}<span class="pill"><i></i>Groq connecté</span>{% else %}<span class="pill off"><i></i>Groq absent</span>{% endif %}
+      <button class="pill ytpill {{ 'off' if yt != 'ok' else '' }}" id="ytBtn" aria-expanded="false" aria-controls="ytPanel"><i></i><span id="ytLabel">{{ {'ok':'YouTube connecté','expired':'YouTube expiré','absent':'Connecter YouTube'}[yt] }}</span></button>
       <button class="icon" id="theme" aria-label="Changer de thème">◐</button>
     </div>
   </header>
+
+  <section class="tile ytpanel" id="ytPanel" hidden>
+    <div class="ythead"><h2>Connecter YouTube</h2><button class="icon" id="ytClose" aria-label="Fermer">✕</button></div>
+    <p class="ytlead">YouTube bloque les serveurs. Dépose ici le fichier de cookies exporté depuis un compte YouTube connecté, et Kopi pourra lire les vidéos.</p>
+    <ol class="steps">
+      <li>Ouvre une fenêtre privée (Ctrl + Maj + N) et connecte-toi à YouTube avec ton compte secondaire.</li>
+      <li>Clique sur l'extension « Get cookies.txt LOCALLY », puis sur « Export ».</li>
+      <li>Ferme la fenêtre privée sans te déconnecter, puis dépose le fichier ci-dessous.</li>
+    </ol>
+    <label class="drop" id="drop" for="ytFile">
+      <input type="file" id="ytFile" accept=".txt,text/plain">
+      <b id="dropTitle">Choisir le fichier cookies (.txt)</b>
+      <small>ou glisse-le ici</small>
+    </label>
+    <p class="ytmsg" id="ytMsg" role="status"></p>
+    <p class="ytnote">Le fichier déposé ici reste actif jusqu'au prochain redémarrage du serveur. Pour qu'il reste pour de bon, il faut aussi l'ajouter une fois dans Render (Claude te guide).</p>
+  </section>
 
   <h1>Colle un compte.<br>Récupère <span>tous les scripts</span>.</h1>
 
@@ -161,6 +192,24 @@ document.querySelectorAll('#plat button').forEach(b=>b.onclick=()=>{
   $('#tabBox').hidden=platform!=='youtube';
   $('#source').placeholder=platform==='tiktok'?'@nomducompte ou https://www.tiktok.com/@...':'@nomdelachaine ou https://www.youtube.com/@...';
 });
+const ytLabels={ok:'YouTube connecté',expired:'YouTube expiré',absent:'Connecter YouTube'};
+function ytState(s){$('#ytBtn').classList.toggle('off',s!=='ok');$('#ytLabel').textContent=ytLabels[s]||ytLabels.absent}
+function ytOpen(o){$('#ytPanel').hidden=!o;$('#ytBtn').setAttribute('aria-expanded',String(o))}
+$('#ytBtn').onclick=()=>ytOpen($('#ytPanel').hidden);
+$('#ytClose').onclick=()=>ytOpen(false);
+async function sendCookies(file){
+  const m=$('#ytMsg');m.className='ytmsg';m.textContent='Envoi…';
+  const fd=new FormData();fd.append('file',file);
+  try{const r=await fetch('/api/cookies',{method:'POST',body:fd});const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Erreur');
+    m.className='ytmsg ok';m.textContent='Cookies installés. Tu peux relancer ta copie YouTube.';ytState('ok');$('#dropTitle').textContent=file.name;
+  }catch(e){m.className='ytmsg bad';m.textContent=e.message}
+}
+$('#ytFile').onchange=e=>{if(e.target.files[0])sendCookies(e.target.files[0])};
+const dz=$('#drop');
+['dragenter','dragover'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add('over')}));
+['dragleave','drop'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove('over')}));
+dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)sendCookies(f)});
 const lim=$('#limit');
 function markChip(v){document.querySelectorAll('#chips button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
 document.querySelectorAll('#chips button').forEach(b=>b.onclick=()=>{
@@ -210,6 +259,7 @@ function watch(id){
     $('#list').innerHTML=items.map(i=>`<div class="it"><span class="n">${String(i.n).padStart(2,'0')}</span><div class="t"><b>${esc(i.title)||esc(i.url)}</b><small>${i.status==='done'?i.chars.toLocaleString('fr-FR')+' caractères':esc(i.msg)||'&nbsp;'}</small></div>${chip(i)}</div>`).join('');
     const running=!['done','error'].includes(d.phase);busy(running);
     if(!running){clearInterval(timer);
+      if(d.platform==='youtube')fetch('/api/cookies').then(r=>r.json()).then(c=>{ytState(c.status);if(c.status!=='ok'&&/cookies/i.test(d.error+items.map(i=>i.msg).join(' ')))ytOpen(true)}).catch(()=>{});
       if(d.has_file){setActs(true);$('#dl').href='/api/job/'+id+'/docx';
         $('#copy').onclick=async()=>{const t=await (await fetch('/api/job/'+id+'/text')).text();try{await navigator.clipboard.writeText(t);$('#copy').textContent='Copié ✓'}catch(e){$('#copy').textContent='Copie refusée par le navigateur'}setTimeout(()=>$('#copy').textContent='Copier tout le texte',2200)}}}
   };

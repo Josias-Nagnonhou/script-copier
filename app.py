@@ -39,12 +39,46 @@ BASE = os.path.join(tempfile.gettempdir(), "script-copier")
 os.makedirs(BASE, exist_ok=True)
 
 COOKIES = {}
-for name in ("YT_COOKIES", "TT_COOKIES"):
-    if os.environ.get(name):
-        p = os.path.join(BASE, name.lower() + ".txt")
-        with open(p, "w") as f:
-            f.write(os.environ[name])
-        COOKIES[name] = p
+# état des cookies YouTube : absent / ok / expired (+ d'où ils viennent)
+YT = {"status": "absent", "source": "", "updated": None}
+
+
+def valid_yt_cookies(text):
+    lines = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+    return any("youtube.com" in l and len(l.split("\t")) >= 7 for l in lines)
+
+
+def install_yt_cookies(text, source):
+    p = os.path.join(BASE, "yt_cookies.txt")  # copie modifiable (yt-dlp la met à jour)
+    with open(p, "w") as f:
+        f.write(text if text.startswith("# Netscape") else "# Netscape HTTP Cookie File\n" + text)
+    COOKIES["YT_COOKIES"] = p
+    YT.update(status="ok", source=source, updated=time.time())
+
+
+def load_cookies():
+    # 1) fichier secret Render (permanent) 2) variable d'environnement
+    for p in sorted(glob.glob("/etc/secrets/*")):
+        try:
+            t = open(p, encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        if valid_yt_cookies(t):
+            install_yt_cookies(t, "render")
+            return
+    for k, v in os.environ.items():
+        if "COOKIE" in k.upper() and "TT" not in k.upper() and valid_yt_cookies(v):
+            install_yt_cookies(v, "render")
+            return
+
+
+load_cookies()
+if os.environ.get("TT_COOKIES"):
+    _p = os.path.join(BASE, "tt_cookies.txt")
+    with open(_p, "w") as f:
+        f.write(os.environ["TT_COOKIES"])
+    COOKIES["TT_COOKIES"] = _p
+print("Cookies YouTube :", YT["status"], flush=True)
 
 JOBS = {}
 LOCK = threading.Lock()
@@ -233,7 +267,22 @@ def transcribe_audio(platform, url, lang, tmp):
     return " ".join(t for t in (groq_transcribe(p, lang) for p in parts) if t).strip()
 
 
+def is_bot_block(msg):
+    m = msg.lower()
+    return "sign in to confirm" in m or "not a bot" in m or "cookies" in m and "youtube" in m
+
+
+def bot_message():
+    if YT["status"] == "absent":
+        return "YouTube bloque le serveur : ajoute tes cookies YouTube (bouton en haut)."
+    YT["status"] = "expired"
+    return "Tes cookies YouTube ont expiré : refais l'export et recolle-les."
+
+
 def process_item(job, item):
+    if job.get("blocked", 0) >= 3:  # YouTube bloque déjà : inutile d'insister
+        item["status"], item["msg"] = "error", job["block_msg"]
+        return
     item["status"] = "working"
     tmp = tempfile.mkdtemp(dir=BASE)
     try:
@@ -259,11 +308,14 @@ def process_item(job, item):
             item["status"], item["msg"] = "empty", "Aucune parole détectée"
         else:
             item["text"], item["status"], item["msg"] = text, "done", ""
+        if job["platform"] == "youtube" and YT["status"] != "absent":
+            YT["status"] = "ok"
     except Exception as e:
-        msg = str(e)
-        msg = re.sub(r"\x1b\[[0-9;]*m", "", msg).replace("ERROR: ", "")
-        if "Sign in to confirm" in msg or "bot" in msg.lower():
-            msg = "YouTube bloque le serveur (cookies nécessaires)."
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        if job["platform"] == "youtube" and is_bot_block(msg):
+            msg = bot_message()
+            job["blocked"] = job.get("blocked", 0) + 1
+            job["block_msg"] = msg
         item["status"], item["msg"] = "error", msg[:200]
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -317,7 +369,7 @@ def run_job(job):
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             list(ex.map(lambda it: process_item(job, it), job["items"]))
         if not any(i["status"] == "done" for i in job["items"]):
-            raise RuntimeError("Aucune vidéo n'a pu être transcrite.")
+            raise RuntimeError(job.get("block_msg") or "Aucune vidéo n'a pu être transcrite.")
         safe = re.sub(r"[^\w-]+", "_", name)[:40].strip("_") or "scripts"
         job["filename"] = f"Scripts_{safe}.docx"
         job["file"] = os.path.join(BASE, job["id"] + ".docx")
@@ -325,8 +377,8 @@ def run_job(job):
         job["phase"] = "done"
     except Exception as e:
         msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
-        if "Sign in to confirm" in msg:
-            msg = "YouTube bloque le serveur. Ajoute tes cookies YouTube (voir le guide)."
+        if job["platform"] == "youtube" and is_bot_block(msg):
+            msg = bot_message()
         job["phase"], job["error"] = "error", msg[:300]
     job["finished"] = time.time()
 
@@ -363,7 +415,7 @@ def login():
 def index():
     if not authed():
         return redirect("/login")
-    return render_template("index.html", groq=bool(GROQ_KEY))
+    return render_template("index.html", groq=bool(GROQ_KEY), yt=YT["status"], yt_src=YT["source"])
 
 
 @app.post("/api/start")
@@ -423,6 +475,25 @@ def job_docx(jid):
     if not j or not j.get("file") or not os.path.exists(j["file"]):
         return "Fichier introuvable", 404
     return send_file(j["file"], as_attachment=True, download_name=j["filename"])
+
+
+@app.get("/api/cookies")
+def cookies_status():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    return jsonify(status=YT["status"], source=YT["source"], updated=YT["updated"])
+
+
+@app.post("/api/cookies")
+def cookies_upload():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    f = request.files.get("file")
+    text = f.read().decode("utf-8", "ignore") if f else (request.form.get("text") or "")
+    if not valid_yt_cookies(text):
+        return jsonify(error="Ce fichier ne contient pas de cookies YouTube. Exporte-le depuis youtube.com avec l'extension."), 400
+    install_yt_cookies(text, "upload")
+    return jsonify(status="ok")
 
 
 @app.get("/favicon.ico")

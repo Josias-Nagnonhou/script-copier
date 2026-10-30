@@ -39,7 +39,7 @@ h1 span{background:var(--lime);color:#111;padding:0 8px;border-radius:10px;box-d
 .seg button.on{background:var(--ink);color:var(--on-ink)}
 label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0 0 6px;letter-spacing:.03em}
 input,select{width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:var(--soft);color:var(--ink);font:600 15px var(--body);min-width:0}
-#source{border:2px solid var(--ink);background:var(--card);font-size:16px;padding:14px 16px}
+#source,.bigin{border:2px solid var(--ink);background:var(--card);font-size:16px;padding:14px 16px}
 input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
 .ytpanel{margin-bottom:18px}
@@ -56,8 +56,8 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
 .ytnote{color:var(--muted);font-size:13px;margin:8px 0 0}
 .num{margin-top:14px}
 .numrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-#limit{width:110px;flex:none;font:800 18px var(--body);text-align:center;font-variant-numeric:tabular-nums}
-#limit.all{color:var(--muted);font-size:15px}
+#limit,.numin{width:110px;flex:none;font:800 18px var(--body);text-align:center;font-variant-numeric:tabular-nums}
+#limit.all,.numin.all{color:var(--muted);font-size:15px}
 .chips{display:flex;gap:6px;flex-wrap:wrap;min-width:0}
 .chips button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 13px;border-radius:99px;font:700 14px var(--body);cursor:pointer}
 .chips button.on{background:var(--ink);color:var(--on-ink);border-color:var(--ink)}
@@ -101,6 +101,7 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
 .c-run{background:rgba(255,46,126,.14);color:var(--run);animation:blink 1s infinite}
 @keyframes blink{50%{opacity:.45}}
 @media (max-width:560px){header{flex-wrap:wrap}.right{flex-wrap:wrap;width:100%}.pill{font-size:12px;padding:6px 10px}.modes{width:100%}.modes button{flex:1;padding:10px 8px;font-size:13px}h1{font-size:32px}}
+.dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:5px;margin:-8px 0 26px;width:max-content;max-width:100%;flex-wrap:wrap}
 .modes button{border:0;background:transparent;color:var(--muted);padding:10px 16px;border-radius:12px;font:800 14px var(--body);cursor:pointer}
 .modes button.on{background:var(--lime);color:#111}
@@ -144,7 +145,47 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
   <nav class="modes" role="tablist" aria-label="Mode">
     <button role="tab" id="tabAcc" class="on" aria-selected="true" aria-controls="modeAcc">Comptes TikTok · YouTube</button>
     <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile">Fichier audio · vidéo</button>
+    <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl">Télécharger TikTok</button>
   </nav>
+
+  <div id="modeDl" role="tabpanel" hidden>
+    <h1>Colle un compte TikTok.<br>Récupère <span>toutes les vidéos</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <label for="dSource">Nom du compte ou lien TikTok</label>
+        <input id="dSource" class="bigin" placeholder="@nomducompte ou https://www.tiktok.com/@..." autocomplete="off">
+        <div class="num">
+          <label for="dLimit">Nombre de vidéos</label>
+          <div class="numrow">
+            <input id="dLimit" class="numin" type="number" inputmode="numeric" min="1" max="1000" step="1" value="10" aria-describedby="dLimitErr">
+            <div class="chips" id="dChips">
+              <button type="button" data-v="5">5</button><button type="button" data-v="10" class="on">10</button><button type="button" data-v="25">25</button><button type="button" data-v="50">50</button><button type="button" data-v="all">Toutes</button>
+            </div>
+          </div>
+          <p class="numerr" id="dLimitErr" hidden>Mets un nombre entre 1 et 1000, ou choisis « Toutes ».</p>
+        </div>
+        <div class="grid">
+          <div><label for="dSort">Lesquelles</label>
+            <select id="dSort"><option value="recent">Plus récentes</option><option value="popular">Plus vues</option></select></div>
+        </div>
+        <button class="go" id="dGo">Télécharger les vidéos →</button>
+        <p class="hint">Vidéos en MP4 sans filigrane, réunies dans un fichier ZIP. Les diaporamas photo sont ignorés.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Vidéos prêtes</span>
+        <div class="big"><span id="dOk">0</span><small id="dTot">/0</small></div>
+        <div class="bar" id="dBar"><i id="dFill"></i></div>
+        <div class="state" id="dState"><span class="empty">Lance un téléchargement pour voir la progression ici.</span></div>
+        <div class="acts">
+          <a class="btn dl" id="dZip" href="#" aria-disabled="true">Télécharger le ZIP</a>
+        </div>
+      </aside>
+    </div>
+    <section class="list" id="dListBox" hidden>
+      <h2 id="dListTitle">Vidéos</h2>
+      <div id="dList"></div>
+    </section>
+  </div>
 
   <div id="modeFile" role="tabpanel" hidden>
     <h1>Importe un audio.<br>Récupère <span>le texte complet</span>.</h1>
@@ -269,14 +310,61 @@ function copyText(t,btn,label){
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
 }
 /* ---------- onglets ---------- */
+const MODES={acc:['#tabAcc','#modeAcc'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl']};
 function setMode(m){
-  const f=m==='file';$('#modeFile').hidden=!f;$('#modeAcc').hidden=f;
-  $('#tabFile').classList.toggle('on',f);$('#tabAcc').classList.toggle('on',!f);
-  $('#tabFile').setAttribute('aria-selected',String(f));$('#tabAcc').setAttribute('aria-selected',String(!f));
+  if(!MODES[m])m='acc';
+  for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
   try{localStorage.setItem('mode',m)}catch(e){}
 }
-$('#tabAcc').onclick=()=>setMode('acc');$('#tabFile').onclick=()=>setMode('file');
-try{if(localStorage.getItem('mode')==='file')setMode('file')}catch(e){}
+for(const [k,[t]] of Object.entries(MODES))$(t).onclick=()=>setMode(k);
+try{setMode(localStorage.getItem('mode')||'acc')}catch(e){}
+
+/* ---------- téléchargement TikTok ---------- */
+let dTimer=null,dBusy=false;
+const dLim=$('#dLimit');
+function dMark(v){document.querySelectorAll('#dChips button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
+document.querySelectorAll('#dChips button').forEach(b=>b.onclick=()=>{$('#dLimitErr').hidden=true;
+  if(b.dataset.v==='all'){dLim.classList.add('all');dLim.value='';dLim.placeholder='Toutes'}else{dLim.classList.remove('all');dLim.placeholder='';dLim.value=b.dataset.v}dMark(b.dataset.v)});
+dLim.oninput=()=>{$('#dLimitErr').hidden=true;dLim.classList.remove('all');dLim.placeholder='';dMark(dLim.value)};
+function dSetBusy(on){dBusy=on;$('#dGo').classList.toggle('busy',on);$('#dGo').textContent=on?'Kopi télécharge…':'Télécharger les vidéos →';$('#dBar').classList.toggle('live',on)}
+function dErr(m){$('#dState').innerHTML=`<div class="err">${esc(m)}</div>`;dSetBusy(false)}
+function mo(b){return b>=1e9?(b/1e9).toFixed(1)+' Go':Math.max(1,Math.round(b/1e6))+' Mo'}
+$('#dGo').onclick=async()=>{
+  if(dBusy)return;
+  const source=$('#dSource').value.trim();if(!source){$('#dSource').focus();return}
+  let limit=0;if(!dLim.classList.contains('all')){limit=parseInt(dLim.value,10);if(!(limit>=1&&limit<=1000)){$('#dLimitErr').hidden=false;dLim.focus();return}}
+  dSetBusy(true);$('#dZip').setAttribute('aria-disabled','true');
+  try{const r=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source,limit,sort:$('#dSort').value})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');
+    try{localStorage.setItem('dlJob',d.job_id)}catch(e){}dWatch(d.job_id)}
+  catch(e){dErr(e.message)}
+};
+function dChip(i){
+  if(i.status==='done')return `<a class="chip c-sub dlink" href="/api/job/${i._job}/video/${i.n}">Télécharger · ${mo(i.size)}</a>`;
+  if(i.status==='working')return '<span class="chip c-run">en cours</span>';
+  if(i.status==='pending')return '<span class="chip c-wait">en attente</span>';
+  return '<span class="chip c-err">ignorée</span>';
+}
+function dWatch(id){
+  clearInterval(dTimer);dSetBusy(true);$('#dListBox').hidden=false;
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(dTimer);dErr((e&&e.error)||'Connexion perdue');try{localStorage.removeItem('dlJob')}catch(_){}return}
+    const items=d.items,fin=items.filter(i=>['done','error','empty'].includes(i.status)).length,ok=items.filter(i=>i.status==='done').length;
+    const running=!['done','error'].includes(d.phase);
+    $('#dOk').textContent=ok;$('#dTot').textContent='/'+items.length;
+    $('#dFill').style.width=items.length?(fin/items.length*100)+'%':(d.phase==='listing'?'6%':'0');
+    $('#dListTitle').textContent=d.source_name?`Vidéos · ${d.source_name}`:'Vidéos';
+    $('#dList').innerHTML=items.map(i=>(i._job=id,`<div class="it"><span class="n">${String(i.n).padStart(2,'0')}</span><div class="t"><b>${esc(i.title)||esc(i.url)}</b><small>${i.status==='done'?i.method:esc(i.msg)||'&nbsp;'}</small></div>${running&&i.status==='done'?'<span class="chip c-sub">prête</span>':dChip(i)}</div>`)).join('');
+    if(d.phase==='error'){clearInterval(dTimer);dErr(d.error);return}
+    if(running){$('#dState').textContent=d.phase==='listing'?'Recherche des vidéos du compte…':`Téléchargement · ${fin}/${items.length}`+(d.zip_size?` · ${mo(d.zip_size)}`:'');return}
+    clearInterval(dTimer);dSetBusy(false);
+    $('#dState').textContent=`Terminé · ${ok} vidéos · ${mo(d.zip_size)}. Le ZIP reste disponible 2 heures.`;
+    $('#dZip').href='/api/job/'+id+'/zip';$('#dZip').setAttribute('aria-disabled','false');
+  };
+  tick();dTimer=setInterval(tick,2500);
+}
+try{const j=localStorage.getItem('dlJob');if(j)dWatch(j)}catch(e){}
 
 /* ---------- transcription d'un fichier ---------- */
 let fFile=null,fTimer=null,fBusy=false;

@@ -1,6 +1,6 @@
 """Kopi — récupère la transcription de plusieurs vidéos TikTok / YouTube
 et les rassemble dans un document Word (Script 1, Script 2, ...)."""
-import os, re, json, time, uuid, glob, shutil, threading, tempfile, subprocess, datetime
+import os, re, zipfile, json, time, uuid, glob, shutil, threading, tempfile, subprocess, datetime
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -399,7 +399,8 @@ def cleanup():
     with LOCK:
         for jid in list(JOBS):
             j = JOBS[jid]
-            if j.get("finished") and now - j["finished"] > 6 * 3600:
+            keep = 2 * 3600 if j["platform"] == "download" else 6 * 3600
+            if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
                 del JOBS[jid]
@@ -464,7 +465,8 @@ def job_status(jid):
     items = [{k: v for k, v in i.items() if k != "text"} | {"chars": len(i["text"])} for i in j["items"]]
     return jsonify(id=j["id"], phase=j["phase"], error=j["error"], source_name=j["source_name"],
                    platform=j["platform"], items=items, has_file=bool(j.get("file")),
-                   part=j.get("part", 0), parts=j.get("parts", 0), duration=j.get("duration", 0))
+                   part=j.get("part", 0), parts=j.get("parts", 0), duration=j.get("duration", 0),
+                   zip_size=j.get("zip_size", 0))
 
 
 @app.get("/api/job/<jid>/text")
@@ -574,6 +576,129 @@ def upload_file():
         JOBS[jid] = job
     threading.Thread(target=run_file_job, args=(job, src), daemon=True).start()
     return jsonify(job_id=jid)
+
+
+# ------------------------------------------------ téléchargement de vidéos TikTok
+def safe_name(t, n=60):
+    t = re.sub(r"#\S+", "", t or "")
+    t = re.sub(r'[\\/:*?"<>|\n\r\t]+', " ", t)
+    return re.sub(r"\s+", " ", t).strip()[:n].strip(" .") or "video"
+
+
+def run_download_job(job):
+    print(f"[téléchargement {job['id']}] {job['url']} (max {job['limit'] or 'toutes'})", flush=True)
+    tmp = tempfile.mkdtemp(dir=BASE)
+    zpath = os.path.join(BASE, job["id"] + ".zip")
+    try:
+        job["phase"] = "listing"
+        name, vids = list_videos("tiktok", job["url"], job["limit"], job["sort"])
+        if not vids:
+            raise RuntimeError("Aucune vidéo trouvée sur ce compte.")
+        job["source_name"] = name
+        job["items"] = [{"n": i + 1, "url": v["url"], "title": v["title"], "status": "pending", "msg": "",
+                         "method": "", "text": "", "size": 0, "arc": ""} for i, v in enumerate(vids)]
+        job["phase"] = "transcribing"
+        width = len(str(len(vids)))
+        for it in job["items"]:
+            if shutil.disk_usage(BASE).free < 400 * 1024 ** 2:
+                it["status"], it["msg"] = "error", "Serveur plein : télécharge ce lot puis relance la suite."
+                continue
+            it["status"], it["msg"] = "working", "Téléchargement…"
+            d = tempfile.mkdtemp(dir=tmp)
+            try:
+                # formats sans filigrane uniquement (TikTok marque « watermarked » les autres)
+                opts = ydl_opts("tiktok", outtmpl=os.path.join(d, "v.%(ext)s"),
+                                format="best[format_note!*=?atermark][vcodec!=?none][acodec!=?none]/"
+                                       "best[format_note!*=?atermark]/best",
+                                format_sort=["vcodec:h264"])  # H.264 : lisible partout (PC, CapCut, téléphone)
+                with yt_dlp.YoutubeDL(opts) as y:
+                    info = y.extract_info(it["url"], download=True)
+                files = [f for f in glob.glob(os.path.join(d, "v.*")) if not f.endswith(".part")]
+                if not files:
+                    raise RuntimeError("Pas de vidéo (c'est peut-être un diaporama photo).")
+                it["title"] = info.get("title") or info.get("description") or it["title"]
+                ext = os.path.splitext(files[0])[1] or ".mp4"
+                arc = f"{str(it['n']).zfill(width)} - {safe_name(it['title'])}{ext}"
+                with zipfile.ZipFile(zpath, "a", zipfile.ZIP_STORED, allowZip64=True) as z:
+                    z.write(files[0], arc)
+                wm = "atermark" in (info.get("format_note") or "")
+                it.update(status="done", msg="", size=os.path.getsize(files[0]), arc=arc,
+                          method="avec filigrane" if wm else "sans filigrane")
+                job["zip_size"] = os.path.getsize(zpath)
+            except Exception as e:
+                msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+                if "photo" in msg.lower() or "slideshow" in msg.lower() or "requested format" in msg.lower():
+                    msg = "Diaporama photo ou format indisponible : ignoré."
+                it["status"], it["msg"] = "error", msg[:200]
+            finally:
+                shutil.rmtree(d, ignore_errors=True)
+        ok = sum(i["status"] == "done" for i in job["items"])
+        if not ok:
+            raise RuntimeError(next((i["msg"] for i in job["items"] if i["msg"]), "Aucune vidéo n'a pu être téléchargée."))
+        job["file"] = zpath
+        job["filename"] = f"TikTok_{safe_name(name, 40).replace(' ', '_')}_{ok}_videos.zip"
+        job["phase"] = "done"
+        print(f"[téléchargement {job['id']}] terminé : {ok}/{len(job['items'])} vidéos, "
+              f"{job.get('zip_size', 0) // 1024 ** 2} Mo", flush=True)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        print(f"[téléchargement {job['id']}] erreur : {msg[:200]}", flush=True)
+        job["phase"], job["error"] = "error", msg[:300]
+        if not job.get("file") and os.path.exists(zpath):
+            os.remove(zpath)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        job["finished"] = time.time()
+
+
+@app.post("/api/download")
+def start_download():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    cleanup()
+    d = request.get_json(force=True)
+    raw = (d.get("source") or "").strip()
+    if not raw:
+        return jsonify(error="Indique un compte TikTok ou un lien."), 400
+    if any(j["platform"] == "download" and j["phase"] in ("queued", "listing", "transcribing") for j in JOBS.values()):
+        return jsonify(error="Un téléchargement est déjà en cours. Attends qu'il se termine."), 409
+    try:
+        limit = int(d.get("limit") or 0)
+    except ValueError:
+        limit = 0
+    job = {"id": uuid.uuid4().hex[:12], "platform": "download", "source": raw,
+           "url": normalize_source("tiktok", raw, None), "limit": max(0, min(limit, 1000)),
+           "sort": "popular" if d.get("sort") == "popular" else "recent", "lang": "",
+           "phase": "queued", "items": [], "source_name": raw, "error": "", "created": time.time(), "zip_size": 0}
+    with LOCK:
+        JOBS[job["id"]] = job
+    threading.Thread(target=run_download_job, args=(job,), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.get("/api/job/<jid>/zip")
+def job_zip(jid):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    if not j or j.get("phase") != "done" or not os.path.exists(j.get("file", "")):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance le téléchargement.", 404
+    return send_file(j["file"], as_attachment=True, download_name=j["filename"], mimetype="application/zip")
+
+
+@app.get("/api/job/<jid>/video/<int:n>")
+def job_video(jid, n):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    if not j or j.get("phase") != "done" or not os.path.exists(j.get("file", "")):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance le téléchargement.", 404
+    it = next((i for i in j["items"] if i["n"] == n and i["status"] == "done"), None)
+    if not it:
+        return "Vidéo introuvable", 404
+    z = zipfile.ZipFile(j["file"])
+    return send_file(z.open(it["arc"]), as_attachment=True, download_name=it["arc"],
+                     mimetype="video/mp4", max_age=0)
 
 
 @app.get("/api/job/<jid>/full")

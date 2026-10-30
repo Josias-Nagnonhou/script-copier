@@ -261,6 +261,13 @@ const dz=$('#drop');
 ['dragenter','dragover'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add('over')}));
 ['dragleave','drop'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove('over')}));
 dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)sendCookies(f)});
+/* ---------- copie robuste (marche même si le navigateur refuse le presse-papiers) ---------- */
+function copyText(t,btn,label){
+  const done=m=>{btn.textContent=m;setTimeout(()=>btn.textContent=label,2500)};
+  if(!t){done('Rien à copier');return}
+  const fallback=()=>{const a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.cssText='position:absolute;left:-9999px;top:0';document.body.appendChild(a);a.select();a.setSelectionRange(0,t.length);let ok=false;try{ok=document.execCommand('copy')}catch(e){}a.remove();done(ok?'Copié ✓':'Copie bloquée : utilise le Word')};
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
+}
 /* ---------- onglets ---------- */
 function setMode(m){
   const f=m==='file';$('#modeFile').hidden=!f;$('#modeAcc').hidden=f;
@@ -319,7 +326,8 @@ function fWatch(id){
     $('#fTitle').textContent='Transcription · '+d.source_name;
     $('#fText').innerHTML=t.split(/(?<=[.!?…])\s+/).reduce((a,s,i)=>{if(i%4===0)a.push([]);a[a.length-1].push(s);return a},[]).map(g=>`<p>${esc(g.join(' '))}</p>`).join('');
     $('#fResult').hidden=false;
-    $('#fCopy').onclick=async()=>{try{await navigator.clipboard.writeText(t);$('#fCopy').textContent='Copié ✓'}catch(e){const r=document.createRange();r.selectNodeContents($('#fText'));const s=getSelection();s.removeAllRanges();s.addRange(r);$('#fCopy').textContent='Texte sélectionné : fais Ctrl + C'}setTimeout(()=>$('#fCopy').textContent='Copier tout le texte',2500)};
+    try{localStorage.setItem('fileText',t)}catch(e){}
+    $('#fCopy').onclick=()=>copyText(t,$('#fCopy'),'Copier tout le texte');
   };
   tick();fTimer=setInterval(tick,2500);
 }
@@ -376,7 +384,8 @@ function watch(id){
     if(!running){clearInterval(timer);
       if(d.platform==='youtube')fetch('/api/cookies').then(r=>r.json()).then(c=>{ytState(c.status);if(c.status!=='ok'&&/cookies/i.test(d.error+items.map(i=>i.msg).join(' ')))ytOpen(true)}).catch(()=>{});
       if(d.has_file){setActs(true);$('#dl').href='/api/job/'+id+'/docx';
-        $('#copy').onclick=async()=>{const t=await (await fetch('/api/job/'+id+'/text')).text();try{await navigator.clipboard.writeText(t);$('#copy').textContent='Copié ✓'}catch(e){$('#copy').textContent='Copie refusée par le navigateur'}setTimeout(()=>$('#copy').textContent='Copier tout le texte',2200)}}}
+        let txt='';fetch('/api/job/'+id+'/text').then(r=>r.ok?r.text():'').then(t=>{txt=t;try{localStorage.setItem('accText',t)}catch(e){}}).catch(()=>{});
+        $('#copy').onclick=()=>copyText(txt,$('#copy'),'Copier tout le texte');}}
   };
   tick();timer=setInterval(tick,2500);
 }

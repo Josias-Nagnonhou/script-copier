@@ -365,6 +365,7 @@ def build_docx(job, path):
 
 
 def run_job(job):
+    print(f"[tâche {job['id']}] {job['platform']} {job['url']} (max {job['limit'] or 'toutes'})", flush=True)
     try:
         job["phase"] = "listing"
         name, vids = list_videos(job["platform"], job["url"], job["limit"], job["sort"])
@@ -383,8 +384,10 @@ def run_job(job):
         job["file"] = os.path.join(BASE, job["id"] + ".docx")
         build_docx(job, job["file"])
         job["phase"] = "done"
+        print(f"[tâche {job['id']}] terminée : {sum(i['status'] == 'done' for i in job['items'])}/{len(job['items'])} scripts", flush=True)
     except Exception as e:
         msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        print(f"[tâche {job['id']}] erreur : {msg[:200]}", flush=True)
         if job["platform"] == "youtube" and is_bot_block(msg):
             msg = bot_message()
         job["phase"], job["error"] = "error", msg[:300]
@@ -497,6 +500,7 @@ def probe_duration(path):
 
 
 def run_file_job(job, src):
+    print(f"[fichier {job['id']}] {job['source_name']}", flush=True)
     item = job["items"][0]
     tmp = os.path.dirname(src)
     try:
@@ -533,8 +537,10 @@ def run_file_job(job, src):
         job["file"] = os.path.join(BASE, job["id"] + ".docx")
         build_docx(job, job["file"])
         job["phase"] = "done"
+        print(f"[fichier {job['id']}] terminé : {len(text)} caractères", flush=True)
     except Exception as e:
         msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e))
+        print(f"[fichier {job['id']}] erreur : {msg[:200]}", flush=True)
         if item["status"] == "working":
             item["status"], item["msg"] = "error", msg[:200]
         job["phase"], job["error"] = "error", msg[:300]

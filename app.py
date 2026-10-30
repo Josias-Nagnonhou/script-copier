@@ -12,6 +12,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or uuid.uuid4().hex
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 ** 3  # 2 Go par fichier
 
 def find_groq_key():
     """Trouve la clé Groq même si le nom de la variable est mal écrit
@@ -333,13 +334,20 @@ def build_docx(job, path):
     doc = Document()
     st = doc.styles["Normal"]
     st.font.name, st.font.size = "Calibri", Pt(11)
-    doc.add_heading(f"Scripts — {job['source_name']}", 0)
+    is_file = job["platform"] == "file"
+    doc.add_heading(f"{'Transcription' if is_file else 'Scripts'} — {job['source_name']}", 0)
     done = [i for i in job["items"] if i["status"] == "done"]
     meta = doc.add_paragraph()
-    r = meta.add_run(f"{'TikTok' if job['platform'] == 'tiktok' else 'YouTube'} · {len(done)} scripts · "
+    label = {"tiktok": "TikTok", "youtube": "YouTube", "file": "Fichier importé"}.get(job["platform"], "")
+    count = "transcription intégrale" if job["platform"] == "file" else f"{len(done)} scripts"
+    r = meta.add_run(f"{label} · {count} · "
                      f"{datetime.datetime.now().strftime('%d/%m/%Y')}")
     r.font.color.rgb, r.font.size = RGBColor(0x66, 0x66, 0x66), Pt(10)
     for n, it in enumerate(done, 1):
+        if is_file:
+            for p in paragraphs(it["text"]):
+                doc.add_paragraph(p)
+            continue
         doc.add_heading(f"Script {n}", 1)
         info = doc.add_paragraph()
         t = info.add_run((it["title"] or "")[:200])
@@ -452,7 +460,8 @@ def job_status(jid):
         return jsonify(error="Tâche introuvable (le serveur a peut-être redémarré)."), 404
     items = [{k: v for k, v in i.items() if k != "text"} | {"chars": len(i["text"])} for i in j["items"]]
     return jsonify(id=j["id"], phase=j["phase"], error=j["error"], source_name=j["source_name"],
-                   platform=j["platform"], items=items, has_file=bool(j.get("file")))
+                   platform=j["platform"], items=items, has_file=bool(j.get("file")),
+                   part=j.get("part", 0), parts=j.get("parts", 0), duration=j.get("duration", 0))
 
 
 @app.get("/api/job/<jid>/text")
@@ -475,6 +484,101 @@ def job_docx(jid):
     if not j or not j.get("file") or not os.path.exists(j["file"]):
         return "Fichier introuvable", 404
     return send_file(j["file"], as_attachment=True, download_name=j["filename"])
+
+
+# ------------------------------------------------ transcription d'un fichier
+def probe_duration(path):
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                              "-of", "default=nw=1:nk=1", path], capture_output=True, text=True, timeout=60)
+        return float(out.stdout.strip())
+    except Exception:
+        return 0.0
+
+
+def run_file_job(job, src):
+    item = job["items"][0]
+    tmp = os.path.dirname(src)
+    try:
+        job["phase"] = "transcribing"
+        item["status"], item["msg"] = "working", "Extraction du son…"
+        job["duration"] = probe_duration(src)
+        # son mono 16 kHz léger, en morceaux de 10 min (bien sous la limite Groq)
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000",
+                            "-b:a", "32k", "-f", "segment", "-segment_time", "600",
+                            os.path.join(tmp, "part_%03d.mp3")], capture_output=True, text=True)
+        try:
+            os.remove(src)  # libère le disque tout de suite
+        except OSError:
+            pass
+        parts = sorted(glob.glob(os.path.join(tmp, "part_*.mp3")))
+        if r.returncode != 0 or not parts:
+            raise RuntimeError("Impossible de lire le son de ce fichier. Vérifie que c'est bien un audio ou une vidéo.")
+        job["parts"] = len(parts)
+        texts = []
+        for i, p in enumerate(parts, 1):
+            item["msg"] = f"Transcription IA · partie {i}/{len(parts)}"
+            job["part"] = i - 1
+            t = groq_transcribe(p, job["lang"])
+            if t:
+                texts.append(t)
+            job["part"] = i
+        text = " ".join(texts).strip()
+        if not text:
+            item["status"], item["msg"] = "empty", "Aucune parole détectée dans ce fichier."
+            raise RuntimeError("Aucune parole détectée dans ce fichier.")
+        item.update(text=text, status="done", msg="", method="IA")
+        safe = re.sub(r"[^\w-]+", "_", os.path.splitext(job["source_name"])[0])[:40].strip("_") or "transcription"
+        job["filename"] = f"Transcription_{safe}.docx"
+        job["file"] = os.path.join(BASE, job["id"] + ".docx")
+        build_docx(job, job["file"])
+        job["phase"] = "done"
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e))
+        if item["status"] == "working":
+            item["status"], item["msg"] = "error", msg[:200]
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        job["finished"] = time.time()
+
+
+@app.post("/api/file")
+def upload_file():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not GROQ_KEY:
+        return jsonify(error="La clé Groq n'est pas configurée : la transcription IA est impossible."), 400
+    cleanup()
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify(error="Choisis un fichier audio ou vidéo."), 400
+    jid = uuid.uuid4().hex[:12]
+    tmp = tempfile.mkdtemp(dir=BASE)
+    ext = os.path.splitext(f.filename)[1][:10] or ".bin"
+    src = os.path.join(tmp, "input" + ext)
+    f.save(src)
+    name = os.path.basename(f.filename)[:120]
+    job = {"id": jid, "platform": "file", "source": name, "url": "", "limit": 1, "sort": "",
+           "lang": (request.form.get("lang") or "").strip()[:5], "phase": "queued", "error": "",
+           "source_name": name, "created": time.time(), "part": 0, "parts": 0, "duration": 0,
+           "items": [{"n": 1, "url": "", "title": name, "status": "pending", "msg": "En attente",
+                      "method": "", "text": ""}]}
+    with LOCK:
+        JOBS[jid] = job
+    threading.Thread(target=run_file_job, args=(job, src), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+@app.get("/api/job/<jid>/full")
+def job_full(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j:
+        return jsonify(error="Tâche introuvable"), 404
+    it = j["items"][0] if j["items"] else {}
+    return jsonify(text=it.get("text", ""))
 
 
 @app.get("/api/cookies")
@@ -507,6 +611,11 @@ def cookies_upload():
 @app.get("/favicon.ico")
 def favicon():
     return send_file(os.path.join(app.root_path, "static", "favicon.ico"), mimetype="image/x-icon")
+
+
+@app.errorhandler(413)
+def too_big(_):
+    return jsonify(error="Fichier trop lourd (2 Go maximum)."), 413
 
 
 @app.get("/health")

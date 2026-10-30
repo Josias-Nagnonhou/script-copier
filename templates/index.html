@@ -100,6 +100,16 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
 .c-err{background:var(--err-bg);color:var(--err)}.c-wait{background:var(--soft);color:var(--muted)}
 .c-run{background:rgba(255,46,126,.14);color:var(--run);animation:blink 1s infinite}
 @keyframes blink{50%{opacity:.45}}
+@media (max-width:560px){header{flex-wrap:wrap}.right{flex-wrap:wrap;width:100%}.pill{font-size:12px;padding:6px 10px}.modes{width:100%}.modes button{flex:1;padding:10px 8px;font-size:13px}h1{font-size:32px}}
+.modes{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:5px;margin:-8px 0 26px;width:max-content;max-width:100%;flex-wrap:wrap}
+.modes button{border:0;background:transparent;color:var(--muted);padding:10px 16px;border-radius:12px;font:800 14px var(--body);cursor:pointer}
+.modes button.on{background:var(--lime);color:#111}
+.fdrop{padding:34px 18px;gap:6px}
+.fdrop b{font-size:17px;word-break:break-word}
+.fic{width:48px;height:48px;border-radius:14px;background:var(--ink);color:var(--lime);display:grid;place-items:center;font-size:22px;margin-bottom:6px}
+.fdrop.has{border-style:solid;border-color:var(--ink);background:var(--card)}
+.ftext{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;max-height:460px;overflow:auto;font-size:16px;line-height:1.75;max-width:100%}
+.ftext p{margin:0 0 14px;max-width:72ch}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -131,6 +141,46 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
     <p class="ytnote">Le fichier déposé ici reste actif jusqu'au prochain redémarrage du serveur. Pour qu'il reste pour de bon, il faut aussi l'ajouter une fois dans Render (Claude te guide).</p>
   </section>
 
+  <nav class="modes" role="tablist" aria-label="Mode">
+    <button role="tab" id="tabAcc" class="on" aria-selected="true" aria-controls="modeAcc">Comptes TikTok · YouTube</button>
+    <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile">Fichier audio · vidéo</button>
+  </nav>
+
+  <div id="modeFile" role="tabpanel" hidden>
+    <h1>Importe un audio.<br>Récupère <span>le texte complet</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <label class="drop fdrop" id="fdrop" for="fFile">
+          <input type="file" id="fFile" accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.ogg,.opus,.webm,.mov,.mkv,.aac,.flac">
+          <span class="fic" aria-hidden="true">♪</span>
+          <b id="fName">Choisir un audio ou une vidéo</b>
+          <small id="fInfo">ou glisse-le ici · MP3, MP4, M4A, WAV, MOV… jusqu'à 2 Go</small>
+        </label>
+        <div class="grid">
+          <div><label for="fLang">Langue parlée</label>
+            <select id="fLang"><option value="">Auto</option><option value="fr" selected>Français</option><option value="en">Anglais</option><option value="ar">Arabe</option><option value="es">Espagnol</option><option value="pt">Portugais</option></select></div>
+        </div>
+        <button class="go" id="fGo">Transcrire le fichier →</button>
+        <p class="hint">Astuce : un fichier audio (MP3, M4A) s'envoie bien plus vite qu'une vidéo.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Progression</span>
+        <div class="big"><span id="fPct">0</span><small>%</small></div>
+        <div class="bar" id="fBar"><i id="fFill"></i></div>
+        <div class="state" id="fState"><span class="empty">Importe un fichier pour lancer la transcription.</span></div>
+        <div class="acts">
+          <a class="btn dl" id="fDl" href="#" aria-disabled="true">Télécharger le Word</a>
+          <button class="btn" id="fCopy" aria-disabled="true">Copier tout le texte</button>
+        </div>
+      </aside>
+    </div>
+    <section class="list" id="fResult" hidden>
+      <h2 id="fTitle">Transcription</h2>
+      <div class="ftext" id="fText"></div>
+    </section>
+  </div>
+
+  <div id="modeAcc" role="tabpanel">
   <h1>Colle un compte.<br>Récupère <span>tous les scripts</span>.</h1>
 
   <div class="bento">
@@ -180,6 +230,7 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
     <h2 id="listTitle">Scripts</h2>
     <div id="list"></div>
   </section>
+  </div>
 </div>
 <script>
 const $=s=>document.querySelector(s);
@@ -210,6 +261,70 @@ const dz=$('#drop');
 ['dragenter','dragover'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add('over')}));
 ['dragleave','drop'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove('over')}));
 dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)sendCookies(f)});
+/* ---------- onglets ---------- */
+function setMode(m){
+  const f=m==='file';$('#modeFile').hidden=!f;$('#modeAcc').hidden=f;
+  $('#tabFile').classList.toggle('on',f);$('#tabAcc').classList.toggle('on',!f);
+  $('#tabFile').setAttribute('aria-selected',String(f));$('#tabAcc').setAttribute('aria-selected',String(!f));
+  try{localStorage.setItem('mode',m)}catch(e){}
+}
+$('#tabAcc').onclick=()=>setMode('acc');$('#tabFile').onclick=()=>setMode('file');
+try{if(localStorage.getItem('mode')==='file')setMode('file')}catch(e){}
+
+/* ---------- transcription d'un fichier ---------- */
+let fFile=null,fTimer=null,fBusy=false;
+function fmtSize(b){return b>1e9?(b/1e9).toFixed(1)+' Go':b>1e6?Math.round(b/1e6)+' Mo':Math.max(1,Math.round(b/1e3))+' Ko'}
+function fmtDur(s){s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+' h ':'')+m+' min '+(h?'':x+' s')}
+function pickFile(f){if(!f)return;fFile=f;$('#fName').textContent=f.name;$('#fInfo').textContent=fmtSize(f.size)+' · prêt à transcrire';$('#fdrop').classList.add('has')}
+$('#fFile').onchange=e=>pickFile(e.target.files[0]);
+const fdz=$('#fdrop');
+['dragenter','dragover'].forEach(t=>fdz.addEventListener(t,e=>{e.preventDefault();fdz.classList.add('over')}));
+['dragleave','drop'].forEach(t=>fdz.addEventListener(t,e=>{e.preventDefault();fdz.classList.remove('over')}));
+fdz.addEventListener('drop',e=>pickFile(e.dataTransfer.files[0]));
+function fProgress(p,live){$('#fPct').textContent=Math.round(p);$('#fFill').style.width=p+'%';$('#fBar').classList.toggle('live',!!live)}
+function fSetBusy(on){fBusy=on;$('#fGo').classList.toggle('busy',on);$('#fGo').textContent=on?'Kopi transcrit…':'Transcrire le fichier →'}
+function fActs(on){['#fDl','#fCopy'].forEach(s=>$(s).setAttribute('aria-disabled',on?'false':'true'))}
+function fErr(m){$('#fState').innerHTML=`<div class="err">${esc(m)}</div>`;fSetBusy(false);fProgress(0,false)}
+$('#fGo').onclick=()=>{
+  if(fBusy)return;
+  if(!fFile){$('#fState').innerHTML='<div class="err">Choisis d\'abord un fichier audio ou vidéo.</div>';return}
+  if(fFile.size>2*1024**3){fErr('Fichier trop lourd (2 Go maximum).');return}
+  fSetBusy(true);fActs(false);$('#fResult').hidden=true;
+  const fd=new FormData();fd.append('file',fFile);fd.append('lang',$('#fLang').value);
+  const x=new XMLHttpRequest();x.open('POST','/api/file');
+  x.upload.onprogress=e=>{if(e.lengthComputable){const p=e.loaded/e.total*100;fProgress(p*0.3,true);$('#fState').textContent=`Envoi du fichier · ${Math.round(p)} % (${fmtSize(e.loaded)} / ${fmtSize(e.total)})`}};
+  x.onload=()=>{let d={};try{d=JSON.parse(x.responseText)}catch(e){}
+    if(x.status!==200){fErr(d.error||'Envoi impossible ('+x.status+').');return}
+    try{localStorage.setItem('fileJob',d.job_id)}catch(e){}
+    fWatch(d.job_id)};
+  x.onerror=()=>fErr('Connexion coupée pendant l\'envoi. Vérifie ta connexion et réessaie.');
+  x.send(fd);
+};
+function fWatch(id){
+  clearInterval(fTimer);fSetBusy(true);
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(fTimer);fErr((e&&e.error)||'Connexion perdue');try{localStorage.removeItem('fileJob')}catch(_){}return}
+    const it=d.items[0]||{};
+    if(d.phase==='transcribing'||d.phase==='queued'){
+      const p=d.parts?30+70*(d.part/d.parts):32;fProgress(Math.min(p,99),true);
+      $('#fState').textContent=(it.msg||'Préparation…')+(d.duration?` · durée ${fmtDur(d.duration)}`:'');
+      return}
+    clearInterval(fTimer);fSetBusy(false);
+    if(d.phase==='error'){fErr(d.error);return}
+    fProgress(100,false);
+    $('#fState').textContent=`Terminé · ${(it.chars||0).toLocaleString('fr-FR')} caractères`+(d.duration?` · ${fmtDur(d.duration)} d'audio`:'');
+    fActs(true);$('#fDl').href='/api/job/'+id+'/docx';
+    const t=(await (await fetch('/api/job/'+id+'/full')).json()).text||'';
+    $('#fTitle').textContent='Transcription · '+d.source_name;
+    $('#fText').innerHTML=t.split(/(?<=[.!?…])\s+/).reduce((a,s,i)=>{if(i%4===0)a.push([]);a[a.length-1].push(s);return a},[]).map(g=>`<p>${esc(g.join(' '))}</p>`).join('');
+    $('#fResult').hidden=false;
+    $('#fCopy').onclick=async()=>{try{await navigator.clipboard.writeText(t);$('#fCopy').textContent='Copié ✓'}catch(e){const r=document.createRange();r.selectNodeContents($('#fText'));const s=getSelection();s.removeAllRanges();s.addRange(r);$('#fCopy').textContent='Texte sélectionné : fais Ctrl + C'}setTimeout(()=>$('#fCopy').textContent='Copier tout le texte',2500)};
+  };
+  tick();fTimer=setInterval(tick,2500);
+}
+try{const j=localStorage.getItem('fileJob');if(j)fWatch(j)}catch(e){}
+
 const lim=$('#limit');
 function markChip(v){document.querySelectorAll('#chips button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
 document.querySelectorAll('#chips button').forEach(b=>b.onclick=()=>{

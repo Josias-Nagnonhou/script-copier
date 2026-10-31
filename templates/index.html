@@ -101,6 +101,13 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
 .c-run{background:rgba(255,46,126,.14);color:var(--run);animation:blink 1s infinite}
 @keyframes blink{50%{opacity:.45}}
 @media (max-width:560px){header{flex-wrap:wrap}.right{flex-wrap:wrap;width:100%}.pill{font-size:12px;padding:6px 10px}.modes{width:100%}.modes button{flex:1;padding:10px 8px;font-size:13px}h1{font-size:32px}}
+textarea#tText{width:100%;min-width:0;resize:vertical;padding:14px 16px;border:2px solid var(--ink);border-radius:14px;background:var(--card);color:var(--ink);font:500 15px/1.6 var(--body);min-height:220px}
+textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
+.trhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.linkbtn{border:0;background:none;color:var(--ink);font:700 13px var(--body);text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:0;margin:0 0 6px;letter-spacing:0}
+.linkbtn input{position:absolute;opacity:0;width:1px;height:1px}
+.trcount{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
+.trcount .linkbtn{margin:0;color:var(--muted)}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:5px;margin:-8px 0 26px;width:max-content;max-width:100%;flex-wrap:wrap}
 .modes button{border:0;background:transparent;color:var(--muted);padding:10px 16px;border-radius:12px;font:800 14px var(--body);cursor:pointer}
@@ -146,7 +153,49 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
     <button role="tab" id="tabAcc" class="on" aria-selected="true" aria-controls="modeAcc">Comptes TikTok · YouTube</button>
     <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile">Fichier audio · vidéo</button>
     <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl">Télécharger TikTok</button>
+    <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr">Traduire</button>
   </nav>
+
+  <div id="modeTr" role="tabpanel" hidden>
+    <h1>Colle un texte.<br>Traduis-le <span>dans n'importe quelle langue</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <div class="trhead">
+          <label for="tText">Texte à traduire</label>
+          <label class="linkbtn" for="tFile"><input type="file" id="tFile" accept=".txt,.docx,.md,.srt,text/plain">Importer un .txt ou .docx</label>
+        </div>
+        <textarea id="tText" rows="11" placeholder="Colle ici ton script, ton texte, tes sous-titres…"></textarea>
+        <div class="trcount"><span id="tCount">0 caractère</span><button type="button" class="linkbtn" id="tClear">Effacer</button></div>
+        <div class="grid">
+          <div><label for="tTarget">Traduire en</label>
+            <select id="tTarget">
+              <option>Anglais</option><option>Français</option><option>Arabe</option><option>Espagnol</option><option>Portugais</option>
+              <option>Allemand</option><option>Italien</option><option>Turc</option><option>Russe</option><option>Chinois (simplifié)</option>
+              <option>Hindi</option><option>Japonais</option><option>Swahili</option><option>Haoussa</option><option>Yoruba</option>
+              <option>Wolof</option><option>Lingala</option><option>Fon</option><option value="__other">Autre langue…</option>
+            </select></div>
+          <div id="tOtherBox" hidden><label for="tOther">Quelle langue ?</label>
+            <input id="tOther" placeholder="Ex. : Amharique, Malgache…" autocomplete="off"></div>
+        </div>
+        <button class="go" id="tGo">Traduire →</button>
+        <p class="hint">Les longs textes sont traduits morceau par morceau, en gardant tes paragraphes.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Progression</span>
+        <div class="big"><span id="tPct">0</span><small>%</small></div>
+        <div class="bar" id="tBar"><i id="tFill"></i></div>
+        <div class="state" id="tState"><span class="empty">Colle un texte puis clique sur Traduire.</span></div>
+        <div class="acts">
+          <a class="btn dl" id="tDl" href="#" aria-disabled="true">Télécharger le Word</a>
+          <button class="btn" id="tCopy" aria-disabled="true">Copier la traduction</button>
+        </div>
+      </aside>
+    </div>
+    <section class="list" id="tResult" hidden>
+      <h2 id="tTitle">Traduction</h2>
+      <div class="ftext" id="tOut"></div>
+    </section>
+  </div>
 
   <div id="modeDl" role="tabpanel" hidden>
     <h1>Colle un compte TikTok.<br>Récupère <span>toutes les vidéos</span>.</h1>
@@ -310,7 +359,7 @@ function copyText(t,btn,label){
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
 }
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl']};
+const MODES={acc:['#tabAcc','#modeAcc'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -318,6 +367,53 @@ function setMode(m){
 }
 for(const [k,[t]] of Object.entries(MODES))$(t).onclick=()=>setMode(k);
 try{setMode(localStorage.getItem('mode')||'acc')}catch(e){}
+
+/* ---------- traduction ---------- */
+let tTimer=null,tBusy=false;
+const tText=$('#tText');
+function tCountUpd(){const n=tText.value.length;$('#tCount').textContent=n.toLocaleString('fr-FR')+(n>1?' caractères':' caractère');try{localStorage.setItem('trDraft',tText.value.slice(0,200000))}catch(e){}}
+tText.oninput=tCountUpd;
+try{const dft=localStorage.getItem('trDraft');if(dft)tText.value=dft;const tg=localStorage.getItem('trTarget');if(tg){if([...$('#tTarget').options].some(o=>o.value===tg))$('#tTarget').value=tg;else{$('#tTarget').value='__other';$('#tOther').value=tg;$('#tOtherBox').hidden=false}}}catch(e){}
+tCountUpd();
+$('#tTarget').onchange=()=>{$('#tOtherBox').hidden=$('#tTarget').value!=='__other';if(!$('#tOtherBox').hidden)$('#tOther').focus()};
+$('#tClear').onclick=()=>{tText.value='';tCountUpd();tText.focus()};
+$('#tFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
+  try{const r=await fetch('/api/extract',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error);tText.value=d.text;tCountUpd()}
+  catch(err){$('#tState').innerHTML=`<div class="err">${esc(err.message||'Lecture impossible')}</div>`}e.target.value=''};
+function tSetBusy(on){tBusy=on;$('#tGo').classList.toggle('busy',on);$('#tGo').textContent=on?'Kopi traduit…':'Traduire →';$('#tBar').classList.toggle('live',on)}
+function tProg(p){$('#tPct').textContent=Math.round(p);$('#tFill').style.width=p+'%'}
+function tErr(m){$('#tState').innerHTML=`<div class="err">${esc(m)}</div>`;tSetBusy(false)}
+$('#tGo').onclick=async()=>{
+  if(tBusy)return;
+  const text=tText.value.trim();if(!text){tText.focus();return}
+  let target=$('#tTarget').value;if(target==='__other'){target=$('#tOther').value.trim();if(!target){$('#tOther').focus();return}}
+  try{localStorage.setItem('trTarget',target)}catch(e){}
+  tSetBusy(true);tProg(0);['#tDl','#tCopy'].forEach(s=>$(s).setAttribute('aria-disabled','true'));$('#tResult').hidden=true;
+  try{const r=await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,target})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('trJob',d.job_id)}catch(e){}tWatch(d.job_id,target)}
+  catch(e){tErr(e.message)}
+};
+function tWatch(id,target){
+  clearInterval(tTimer);tSetBusy(true);
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(tTimer);tSetBusy(false);tProg(0);$('#tState').innerHTML='<span class="empty">Colle un texte puis clique sur Traduire.</span>';try{localStorage.removeItem('trJob')}catch(_){}return}
+    const it=d.items[0]||{};
+    if(!['done','error'].includes(d.phase)){tProg(d.parts?Math.max(4,d.part/d.parts*100):4);$('#tState').textContent=it.msg||'Préparation…';return}
+    clearInterval(tTimer);tSetBusy(false);
+    if(d.phase==='error'){tErr(d.error);return}
+    tProg(100);
+    const t=(await (await fetch('/api/job/'+id+'/full')).json()).text||'';
+    $('#tState').textContent=`Terminé · ${t.length.toLocaleString('fr-FR')} caractères`;
+    $('#tTitle').textContent='Traduction'+(target?' · '+target:'');
+    $('#tOut').innerHTML=t.split('\n').filter(x=>x.trim()).map(x=>`<p>${esc(x)}</p>`).join('');
+    $('#tResult').hidden=false;
+    $('#tDl').href='/api/job/'+id+'/docx';['#tDl','#tCopy'].forEach(s=>$(s).setAttribute('aria-disabled','false'));
+    $('#tCopy').onclick=()=>copyText(t,$('#tCopy'),'Copier la traduction');
+  };
+  tick();tTimer=setInterval(tick,2000);
+}
+try{const j=localStorage.getItem('trJob');if(j)tWatch(j,localStorage.getItem('trTarget')||'')}catch(e){}
 
 /* ---------- téléchargement TikTok ---------- */
 let dTimer=null,dBusy=false;

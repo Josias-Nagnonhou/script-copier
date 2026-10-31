@@ -334,16 +334,23 @@ def build_docx(job, path):
     doc = Document()
     st = doc.styles["Normal"]
     st.font.name, st.font.size = "Calibri", Pt(11)
-    is_file = job["platform"] == "file"
-    doc.add_heading(f"{'Transcription' if is_file else 'Scripts'} — {job['source_name']}", 0)
+    is_file = job["platform"] in ("file", "translate")
+    kind = {"file": "Transcription", "translate": "Traduction"}.get(job["platform"], "Scripts")
+    doc.add_heading(f"{kind} — {job['source_name']}", 0)
     done = [i for i in job["items"] if i["status"] == "done"]
     meta = doc.add_paragraph()
-    label = {"tiktok": "TikTok", "youtube": "YouTube", "file": "Fichier importé"}.get(job["platform"], "")
-    count = "transcription intégrale" if job["platform"] == "file" else f"{len(done)} scripts"
+    label = {"tiktok": "TikTok", "youtube": "YouTube", "file": "Fichier importé",
+             "translate": f"Traduit en {job.get('target', '')}"}.get(job["platform"], "")
+    count = {"file": "transcription intégrale", "translate": f"{len(job['items'][0]['text'])} caractères"}.get(
+        job["platform"], f"{len(done)} scripts")
     r = meta.add_run(f"{label} · {count} · "
                      f"{datetime.datetime.now().strftime('%d/%m/%Y')}")
     r.font.color.rgb, r.font.size = RGBColor(0x66, 0x66, 0x66), Pt(10)
     for n, it in enumerate(done, 1):
+        if job["platform"] == "translate":  # garder les paragraphes du texte d'origine
+            for p in [x.strip() for x in it["text"].split("\n") if x.strip()]:
+                doc.add_paragraph(p)
+            continue
         if is_file:
             for p in paragraphs(it["text"]):
                 doc.add_paragraph(p)
@@ -699,6 +706,145 @@ def job_video(jid, n):
     z = zipfile.ZipFile(j["file"])
     return send_file(z.open(it["arc"]), as_attachment=True, download_name=it["arc"],
                      mimetype="video/mp4", max_age=0)
+
+
+# ------------------------------------------------ traduction
+CHAT_MODELS = [m.strip() for m in os.environ.get(
+    "GROQ_CHAT_MODELS", "openai/gpt-oss-120b,llama-3.3-70b-versatile,openai/gpt-oss-20b,llama-3.1-8b-instant").split(",") if m.strip()]
+GOOD_MODEL = {"name": None}
+
+
+def groq_chat(messages, max_tokens=6000):
+    models = ([GOOD_MODEL["name"]] if GOOD_MODEL["name"] else []) + [m for m in CHAT_MODELS if m != GOOD_MODEL["name"]]
+    last = ""
+    for model in models:
+        for attempt in range(6):
+            r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                              headers={"Authorization": f"Bearer {GROQ_KEY}"},
+                              json={"model": model, "messages": messages, "temperature": 0.2,
+                                    "max_tokens": max_tokens}, timeout=180)
+            if r.status_code == 200:
+                GOOD_MODEL["name"] = model
+                return (r.json()["choices"][0]["message"].get("content") or "").strip()
+            if r.status_code in (429, 500, 502, 503):
+                try:
+                    wait = float(r.headers.get("retry-after"))
+                except (TypeError, ValueError):
+                    wait = 10 * (attempt + 1)
+                time.sleep(min(max(wait, 2), 90))
+                continue
+            if r.status_code == 401:
+                raise RuntimeError("Clé Groq invalide.")
+            last = f"{model} : {r.status_code} {r.text[:120]}"
+            print(f"[traduction] modèle refusé {last}", flush=True)
+            break  # modèle indisponible : on essaie le suivant
+        else:
+            raise RuntimeError("Limite Groq atteinte, réessaie dans quelques minutes.")
+    raise RuntimeError(f"Aucun modèle de traduction disponible chez Groq ({last}).")
+
+
+def chunk_text(text, size=2500):
+    """Découpe en morceaux d'environ `size` caractères sans casser les paragraphes."""
+    chunks, cur = [], ""
+    for para in text.split("\n"):
+        pieces = [para] if len(para) <= size else re.split(r"(?<=[.!?…])\s+", para)
+        for i, piece in enumerate(pieces):
+            sep = "\n" if i == 0 else " "
+            if cur and len(cur) + len(piece) + 1 > size:
+                chunks.append(cur)
+                cur, sep = "", ""
+            cur = (cur + sep + piece) if cur else piece
+    if cur.strip():
+        chunks.append(cur)
+    return [c for c in chunks if c.strip()]
+
+
+def run_translate_job(job, text):
+    print(f"[traduction {job['id']}] {len(text)} caractères → {job['target']}", flush=True)
+    item = job["items"][0]
+    try:
+        job["phase"] = "transcribing"
+        chunks = chunk_text(text)
+        job["parts"] = len(chunks)
+        system = (f"Tu es un traducteur professionnel. Traduis le texte de l'utilisateur en {job['target']}. "
+                  "Garde exactement le sens, le ton et l'émotion, ainsi que les retours à la ligne et la mise en forme. "
+                  "Garde les noms propres, et traduis les citations religieuses avec leurs formulations reconnues "
+                  "dans la langue cible quand elles existent. Si une partie est déjà dans la langue cible, laisse-la telle quelle. "
+                  "Réponds uniquement avec la traduction, sans phrase d'introduction, sans note ni commentaire.")
+        out = []
+        for i, c in enumerate(chunks, 1):
+            item["status"], item["msg"] = "working", f"Traduction · partie {i}/{len(chunks)}"
+            job["part"] = i - 1
+            out.append(groq_chat([{"role": "system", "content": system}, {"role": "user", "content": c}]))
+            job["part"] = i
+        result = "\n".join(out).strip()
+        if not result:
+            raise RuntimeError("La traduction est revenue vide. Réessaie.")
+        item.update(text=result, status="done", msg="", method="IA")
+        job["file"] = os.path.join(BASE, job["id"] + ".docx")
+        safe = re.sub(r"[^\w-]+", "_", job["target"])[:20].strip("_") or "traduction"
+        job["filename"] = f"Traduction_{safe}.docx"
+        build_docx(job, job["file"])
+        job["phase"] = "done"
+        print(f"[traduction {job['id']}] terminée ({GOOD_MODEL['name']}) : {len(result)} caractères", flush=True)
+    except Exception as e:
+        msg = str(e)
+        print(f"[traduction {job['id']}] erreur : {msg[:200]}", flush=True)
+        item["status"], item["msg"] = "error", msg[:200]
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        job["finished"] = time.time()
+
+
+@app.post("/api/translate")
+def start_translate():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not GROQ_KEY:
+        return jsonify(error="La clé Groq n'est pas configurée : la traduction est impossible."), 400
+    cleanup()
+    d = request.get_json(force=True)
+    text = (d.get("text") or "").replace("\r\n", "\n").strip()
+    target = re.sub(r"\s+", " ", (d.get("target") or "")).strip()[:40]
+    if not text:
+        return jsonify(error="Colle d'abord un texte à traduire."), 400
+    if not target:
+        return jsonify(error="Choisis la langue de traduction."), 400
+    if len(text) > 200000:
+        return jsonify(error="Texte trop long (200 000 caractères maximum). Coupe-le en deux."), 400
+    first = re.sub(r"\s+", " ", text)[:50].strip()
+    job = {"id": uuid.uuid4().hex[:12], "platform": "translate", "source": first, "url": "", "limit": 1,
+           "sort": "", "lang": "", "target": target, "phase": "queued", "error": "", "created": time.time(),
+           "source_name": f"{first}…" if len(text) > 50 else first, "part": 0, "parts": 0,
+           "items": [{"n": 1, "url": "", "title": first, "status": "pending", "msg": "En attente",
+                      "method": "", "text": ""}]}
+    with LOCK:
+        JOBS[job["id"]] = job
+    threading.Thread(target=run_translate_job, args=(job, text), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.post("/api/extract")
+def extract_text():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify(error="Choisis un fichier."), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    try:
+        if ext == ".docx":
+            text = "\n".join(p.text for p in Document(f.stream).paragraphs)
+        elif ext in (".txt", ".md", ".srt", ".vtt", ""):
+            raw = f.read()
+            text = raw.decode("utf-8") if raw[:3] != b"\xef\xbb\xbf" else raw[3:].decode("utf-8")
+        else:
+            return jsonify(error="Format non pris en charge : utilise un fichier .txt ou .docx (Word)."), 400
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    except Exception:
+        return jsonify(error="Impossible de lire ce fichier."), 400
+    return jsonify(text=re.sub(r"\n{3,}", "\n\n", text).strip())
 
 
 @app.get("/api/job/<jid>/full")

@@ -108,6 +108,14 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 .linkbtn input{position:absolute;opacity:0;width:1px;height:1px}
 .trcount{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
 .trcount .linkbtn{margin:0;color:var(--muted)}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-top:8px}
+.gi{margin:0;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.gi img,.gi video{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;background:var(--soft);max-width:100%}
+.gph{aspect-ratio:3/4;display:grid;place-items:center;background:var(--soft);color:var(--muted);font-weight:800;max-width:100%}
+.gph.aud{gap:8px;padding:12px;align-content:center}.gph.aud span{font-size:34px;color:var(--ink)}.gph.aud audio{width:100%}
+.gi figcaption{padding:10px 12px;display:grid;gap:2px}
+.gi figcaption b{font-size:14px}.gi figcaption small{color:var(--muted);font-size:12px}
+.gsave{justify-self:start;margin-top:6px;border:0;cursor:pointer;font-family:var(--body)}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:5px;margin:-8px 0 26px;width:max-content;max-width:100%;flex-wrap:wrap}
 .modes button{border:0;background:transparent;color:var(--muted);padding:10px 16px;border-radius:12px;font:800 14px var(--body);cursor:pointer}
@@ -154,7 +162,34 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
     <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile">Fichier audio · vidéo</button>
     <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl">Télécharger TikTok</button>
     <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr">Traduire</button>
+    <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd">Photos · posts</button>
   </nav>
+
+  <div id="modeMd" role="tabpanel" hidden>
+    <h1>Colle un lien de post.<br>Récupère <span>toutes les photos</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <label for="mUrl">Lien du post X (Twitter) ou TikTok</label>
+        <input id="mUrl" class="bigin" inputmode="url" placeholder="https://x.com/… ou https://www.tiktok.com/@…/photo/…" autocomplete="off">
+        <button class="go" id="mGo">Récupérer les médias →</button>
+        <p class="hint">Photos en qualité d'origine, sans filigrane. Pour un diaporama TikTok, la musique est récupérée aussi.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Médias trouvés</span>
+        <div class="big"><span id="mOk">0</span><small id="mTot">/0</small></div>
+        <div class="bar" id="mBar"><i id="mFill"></i></div>
+        <div class="state" id="mState"><span class="empty">Colle un lien pour voir les photos ici.</span></div>
+        <div class="acts">
+          <button class="btn dl" id="mSave" aria-disabled="true">Tout enregistrer</button>
+          <a class="btn" id="mZip" href="#" aria-disabled="true">Télécharger le ZIP</a>
+        </div>
+      </aside>
+    </div>
+    <section class="list" id="mBox" hidden>
+      <h2 id="mTitle">Médias</h2>
+      <div class="gal" id="mGal"></div>
+    </section>
+  </div>
 
   <div id="modeTr" role="tabpanel" hidden>
     <h1>Colle un texte.<br>Traduis-le <span>dans n'importe quelle langue</span>.</h1>
@@ -359,7 +394,7 @@ function copyText(t,btn,label){
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
 }
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr']};
+const MODES={acc:['#tabAcc','#modeAcc'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -367,6 +402,71 @@ function setMode(m){
 }
 for(const [k,[t]] of Object.entries(MODES))$(t).onclick=()=>setMode(k);
 try{setMode(localStorage.getItem('mode')||'acc')}catch(e){}
+
+/* ---------- photos / médias d'un post ---------- */
+const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const MOBILE=IOS||/Android/i.test(navigator.userAgent);
+let mTimer=null,mBusy=false,mFiles=[];
+function canShareFiles(files){try{return !!(navigator.canShare&&navigator.canShare({files}))}catch(e){return false}}
+function mSetBusy(on){mBusy=on;$('#mGo').classList.toggle('busy',on);$('#mGo').textContent=on?'Kopi récupère…':'Récupérer les médias →';$('#mBar').classList.toggle('live',on)}
+function mErr(m){$('#mState').innerHTML=`<div class="err">${esc(m)}</div>`;mSetBusy(false)}
+function dlLink(href,name){const a=document.createElement('a');a.href=href;a.download=name||'';document.body.appendChild(a);a.click();a.remove()}
+$('#mUrl').addEventListener('keydown',e=>{if(e.key==='Enter')$('#mGo').click()});
+$('#mGo').onclick=async()=>{
+  if(mBusy)return;
+  const url=$('#mUrl').value.trim();if(!url){$('#mUrl').focus();return}
+  mSetBusy(true);mFiles=[];['#mSave','#mZip'].forEach(s=>$(s).setAttribute('aria-disabled','true'));$('#mBox').hidden=true;
+  try{const r=await fetch('/api/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('mdJob',d.job_id)}catch(e){}mWatch(d.job_id)}
+  catch(e){mErr(e.message)}
+};
+function mTile(id,i){
+  const src=`/api/job/${id}/m/${i.n}`;
+  if(i.status!=='done')return `<figure class="gi gi-wait"><div class="gph">${i.status==='error'?'Échec':'…'}</div><figcaption><b>${esc(i.title)}</b><small>${esc(i.msg)||'en attente'}</small></figcaption></figure>`;
+  const view=i.kind==='photo'?`<img src="${src}" alt="${esc(i.title)}" loading="lazy">`:i.kind==='video'?`<video src="${src}" controls playsinline preload="metadata"></video>`:`<div class="gph aud"><span>♪</span><audio src="${src}" controls preload="none"></audio></div>`;
+  return `<figure class="gi">${view}<figcaption><b>${esc(i.title)}</b><small>${mo(i.size)}${i.method?' · '+i.method:''}</small><button type="button" class="chip c-sub gsave" data-n="${i.n}">Enregistrer</button></figcaption></figure>`;
+}
+async function mPrefetch(id,items){
+  mFiles=[];
+  for(const i of items.filter(x=>x.status==='done')){
+    try{const b=await (await fetch(`/api/job/${id}/m/${i.n}`)).blob();mFiles.push({n:i.n,kind:i.kind,file:new File([b],i.name,{type:b.type||(i.kind==='photo'?'image/jpeg':i.kind==='video'?'video/mp4':'audio/mpeg')})})}catch(e){}
+  }
+}
+function mSaveOne(id,n,name){
+  const f=mFiles.find(x=>x.n===n);
+  if(IOS&&f&&canShareFiles([f.file])){navigator.share({files:[f.file]}).catch(()=>{});return}
+  dlLink(`/api/job/${id}/m/${n}?dl=1`,name);
+}
+function mWatch(id){
+  clearInterval(mTimer);mSetBusy(true);
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(mTimer);mSetBusy(false);$('#mState').innerHTML='<span class="empty">Colle un lien pour voir les photos ici.</span>';try{localStorage.removeItem('mdJob')}catch(_){}return}
+    const items=d.items,ok=items.filter(i=>i.status==='done').length,fin=items.filter(i=>['done','error'].includes(i.status)).length;
+    $('#mOk').textContent=ok;$('#mTot').textContent='/'+items.length;
+    $('#mFill').style.width=items.length?(fin/items.length*100)+'%':(d.phase==='listing'?'10%':'0');
+    if(items.length){$('#mBox').hidden=false;$('#mTitle').textContent=d.source_name||'Médias';$('#mGal').innerHTML=items.map(i=>mTile(id,i)).join('')}
+    if(!['done','error'].includes(d.phase)){$('#mState').textContent=d.phase==='listing'?'Lecture du post…':`Téléchargement · ${fin}/${items.length}`;return}
+    clearInterval(mTimer);mSetBusy(false);
+    if(d.phase==='error'){mErr(d.error);return}
+    const photos=items.filter(i=>i.status==='done'&&i.kind!=='audio').length;
+    $('#mState').textContent=`Prêt · ${ok} fichier${ok>1?'s':''} · ${mo(d.zip_size)}`+(IOS?' · préparation pour la galerie…':'');
+    $('#mZip').href='/api/job/'+id+'/zip';$('#mZip').setAttribute('aria-disabled','false');$('#mZip').hidden=!MOBILE;
+    $('#mSave').textContent=IOS?(photos>1?`Enregistrer les ${photos} dans Photos`:'Enregistrer dans Photos'):MOBILE?'Tout télécharger':'Tout télécharger (ZIP)';
+    $('#mGal').onclick=e=>{const b=e.target.closest('.gsave');if(!b)return;const it=items.find(x=>x.n===+b.dataset.n);mSaveOne(id,it.n,it.name)};
+    await mPrefetch(id,items);
+    if(IOS)$('#mState').textContent=`Prêt · ${ok} fichier${ok>1?'s':''}. Touche le bouton puis « Enregistrer ${photos>1?photos+' images':"l'image"} ».`;
+    $('#mSave').setAttribute('aria-disabled','false');
+    $('#mSave').onclick=()=>{
+      const vis=mFiles.filter(x=>x.kind!=='audio').map(x=>x.file);
+      if(IOS&&vis.length&&canShareFiles(vis)){navigator.share({files:vis}).catch(()=>{});return}
+      if(MOBILE){items.filter(i=>i.status==='done').forEach((i,k)=>setTimeout(()=>dlLink(`/api/job/${id}/m/${i.n}?dl=1`,i.name),k*700));return}
+      dlLink('/api/job/'+id+'/zip');
+    };
+  };
+  tick();mTimer=setInterval(tick,2000);
+}
+try{const j=localStorage.getItem('mdJob');if(j)mWatch(j)}catch(e){}
 
 /* ---------- traduction ---------- */
 let tTimer=null,tBusy=false;

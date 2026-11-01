@@ -406,10 +406,12 @@ def cleanup():
     with LOCK:
         for jid in list(JOBS):
             j = JOBS[jid]
-            keep = 2 * 3600 if j["platform"] == "download" else 6 * 3600
+            keep = 2 * 3600 if j["platform"] in ("download", "media") else 6 * 3600
             if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
+                if j.get("dir"):
+                    shutil.rmtree(j["dir"], ignore_errors=True)
                 del JOBS[jid]
 
 
@@ -469,7 +471,7 @@ def job_status(jid):
     j = JOBS.get(jid)
     if not j:
         return jsonify(error="Tâche introuvable (le serveur a peut-être redémarré)."), 404
-    items = [{k: v for k, v in i.items() if k != "text"} | {"chars": len(i["text"])} for i in j["items"]]
+    items = [{k: v for k, v in i.items() if k not in ("text", "path")} | {"chars": len(i["text"])} for i in j["items"]]
     return jsonify(id=j["id"], phase=j["phase"], error=j["error"], source_name=j["source_name"],
                    platform=j["platform"], items=items, has_file=bool(j.get("file")),
                    part=j.get("part", 0), parts=j.get("parts", 0), duration=j.get("duration", 0),
@@ -681,6 +683,243 @@ def start_download():
         JOBS[job["id"]] = job
     threading.Thread(target=run_download_job, args=(job,), daemon=True).start()
     return jsonify(job_id=job["id"])
+
+
+# ------------------------------------------------ photos / médias d'un post (X, TikTok)
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+      "Chrome/126.0.0.0 Safari/537.36")
+
+
+def http_get(url, **kw):
+    h = {"User-Agent": UA, "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8"}
+    h.update(kw.pop("headers", {}))
+    return requests.get(url, headers=h, timeout=kw.pop("timeout", 30), **kw)
+
+
+def tw_orig(u):
+    """pbs.twimg.com/media/XXX.jpg → version d'origine (pleine qualité)."""
+    m = re.match(r"(https://pbs\.twimg\.com/media/[^.?]+)(?:\.(\w+))?", u or "")
+    if not m:
+        return u
+    ext = m.group(2) or (re.search(r"format=(\w+)", u).group(1) if "format=" in u else "jpg")
+    return f"{m.group(1)}?format={ext}&name=orig"
+
+
+def extract_twitter(url):
+    m = re.search(r"/status(?:es)?/(\d+)", url)
+    if not m:
+        raise RuntimeError("Ce lien X/Twitter ne contient pas de numéro de post.")
+    tid, errors = m.group(1), []
+    # 1) fxtwitter
+    try:
+        t = http_get(f"https://api.fxtwitter.com/status/{tid}").json()["tweet"]
+        media = (t.get("media") or {})
+        out = [{"kind": "photo", "url": tw_orig(p["url"])} for p in media.get("photos") or []]
+        out += [{"kind": "video", "url": v["url"]} for v in media.get("videos") or []]
+        if out:
+            return (t.get("author") or {}).get("screen_name", ""), t.get("text", ""), out
+    except Exception as e:
+        errors.append(f"fx {e}")
+    # 2) vxtwitter
+    try:
+        t = http_get(f"https://api.vxtwitter.com/Twitter/status/{tid}").json()
+        out = []
+        for x in t.get("media_extended") or []:
+            if x.get("type") == "image":
+                out.append({"kind": "photo", "url": tw_orig(x["url"])})
+            elif x.get("type") in ("video", "gif"):
+                out.append({"kind": "video", "url": x["url"]})
+        if out:
+            return t.get("user_screen_name", ""), t.get("text", ""), out
+    except Exception as e:
+        errors.append(f"vx {e}")
+    # 3) syndication officielle
+    try:
+        t = http_get(f"https://cdn.syndication.twimg.com/tweet-result?id={tid}&lang=fr&token=a").json()
+        out = []
+        for x in t.get("mediaDetails") or []:
+            if x.get("type") == "photo":
+                out.append({"kind": "photo", "url": tw_orig(x["media_url_https"])})
+            else:
+                vs = [v for v in (x.get("video_info") or {}).get("variants", []) if v.get("content_type") == "video/mp4"]
+                if vs:
+                    out.append({"kind": "video", "url": max(vs, key=lambda v: v.get("bitrate", 0))["url"]})
+        if out:
+            return (t.get("user") or {}).get("screen_name", ""), t.get("text", ""), out
+    except Exception as e:
+        errors.append(f"syn {e}")
+    print(f"[médias] X {tid} : rien trouvé ({'; '.join(errors)[:300]})", flush=True)
+    raise RuntimeError("Aucune photo ni vidéo trouvée dans ce post (post supprimé, privé ou réservé aux abonnés ?).")
+
+
+def pick_img(urls):
+    urls = [u for u in urls or [] if u]
+    return next((u for u in urls if re.search(r"\.jpe?g|format=jpe?g", u, re.I)), urls[0] if urls else None)
+
+
+def extract_tiktok(url):
+    errors = []
+    try:
+        r = http_get(url, headers={"Referer": "https://www.tiktok.com/"}, allow_redirects=True)
+        url = r.url
+        m = re.search(r'<script[^>]+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', r.text, re.S)
+        if m:
+            item = json.loads(m.group(1))["__DEFAULT_SCOPE__"]["webapp.video-detail"]["itemInfo"]["itemStruct"]
+            author = (item.get("author") or {}).get("uniqueId", "")
+            imgs = (item.get("imagePost") or {}).get("images") or []
+            out = [{"kind": "photo", "url": pick_img((i.get("imageURL") or {}).get("urlList"))} for i in imgs]
+            out = [o for o in out if o["url"]]
+            if out:
+                music = (item.get("music") or {}).get("playUrl")
+                if music:
+                    out.append({"kind": "audio", "url": music})
+                return author, item.get("desc", ""), out
+            if item.get("video"):
+                return author, item.get("desc", ""), [{"kind": "ytdlp", "url": url}]
+        errors.append("page sans données")
+    except Exception as e:
+        errors.append(f"page {e}")
+    # secours : tikwm
+    try:
+        d = http_get("https://www.tikwm.com/api/", params={"url": url, "hd": 1}).json().get("data") or {}
+        out = [{"kind": "photo", "url": u} for u in d.get("images") or []]
+        if out:
+            if d.get("music"):
+                out.append({"kind": "audio", "url": d["music"]})
+            return (d.get("author") or {}).get("unique_id", ""), d.get("title", ""), out
+        v = d.get("hdplay") or d.get("play")
+        if v:
+            return (d.get("author") or {}).get("unique_id", ""), d.get("title", ""), [{"kind": "video", "url": v}]
+    except Exception as e:
+        errors.append(f"tikwm {e}")
+    print(f"[médias] TikTok {url} : rien trouvé ({'; '.join(errors)[:300]})", flush=True)
+    return "", "", [{"kind": "ytdlp", "url": url}]
+
+
+def extract_post(url):
+    host = re.sub(r"^www\.|^m\.|^mobile\.", "", requests.utils.urlparse(url).netloc.lower())
+    if host in ("x.com", "twitter.com", "fxtwitter.com", "vxtwitter.com", "fixupx.com", "t.co"):
+        if host == "t.co":
+            url = http_get(url, allow_redirects=True).url
+        return "x", *extract_twitter(url)
+    if host.endswith("tiktok.com"):
+        return "tiktok", *extract_tiktok(url)
+    return "autre", "", "", [{"kind": "ytdlp", "url": url}]
+
+
+EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/heic": ".heic",
+       "video/mp4": ".mp4", "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a"}
+
+
+def fetch_media(it, d, referer):
+    if it["kind"] == "ytdlp":
+        opts = ydl_opts("tiktok" if "tiktok" in it["url"] else "other", outtmpl=os.path.join(d, f"{it['n']:02d}.%(ext)s"),
+                        format="best[format_note!*=?atermark][vcodec!=?none][acodec!=?none]/best[format_note!*=?atermark]/best",
+                        format_sort=["vcodec:h264"])
+        with yt_dlp.YoutubeDL(opts) as y:
+            y.extract_info(it["url"], download=True)
+        files = [f for f in glob.glob(os.path.join(d, f"{it['n']:02d}.*")) if not f.endswith(".part")]
+        if not files:
+            raise RuntimeError("Aucun média téléchargeable à ce lien.")
+        it["kind"] = "video"
+        return files[0]
+    with http_get(it["url"], headers={"Referer": referer}, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        ctype = r.headers.get("content-type", "").split(";")[0].strip()
+        ext = EXT.get(ctype) or os.path.splitext(requests.utils.urlparse(it["url"]).path)[1][:5] or \
+            {"photo": ".jpg", "video": ".mp4", "audio": ".mp3"}[it["kind"]]
+        path = os.path.join(d, f"{it['n']:02d}{ext}")
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(256 * 1024):
+                f.write(chunk)
+    if it["kind"] == "photo" and ext in (".webp", ".heic"):
+        try:  # JPEG : s'ouvre partout et s'enregistre dans la galerie de l'iPhone
+            from PIL import Image
+            jpg = os.path.splitext(path)[0] + ".jpg"
+            Image.open(path).convert("RGB").save(jpg, "JPEG", quality=95, subsampling=0)
+            os.remove(path)
+            path = jpg
+        except Exception:
+            pass
+    return path
+
+
+def run_media_job(job):
+    print(f"[médias {job['id']}] {job['url']}", flush=True)
+    d = os.path.join(BASE, "m_" + job["id"])
+    os.makedirs(d, exist_ok=True)
+    job["dir"] = d
+    try:
+        job["phase"] = "listing"
+        site, author, text, media = extract_post(job["url"])
+        job["site"] = site
+        job["source_name"] = ("@" + author if author else "Post") + (f" · {re.sub(chr(10), ' ', text)[:60]}" if text else "")
+        labels = {"photo": "Photo", "video": "Vidéo", "audio": "Musique", "ytdlp": "Vidéo"}
+        job["items"] = [{"n": i + 1, "url": m["url"], "kind": m["kind"], "title": f"{labels[m['kind']]} {i + 1}",
+                         "status": "pending", "msg": "", "method": "", "text": "", "size": 0, "name": ""}
+                        for i, m in enumerate(media)]
+        job["phase"] = "transcribing"
+        referer = "https://www.tiktok.com/" if site == "tiktok" else "https://x.com/"
+        base = re.sub(r"[^\w-]+", "_", author or site)[:30] or "post"
+        for it in job["items"]:
+            it["status"], it["msg"] = "working", "Téléchargement…"
+            try:
+                path = fetch_media(it, d, referer)
+                it["title"] = f"{labels[it['kind']]} {it['n']}"
+                it["name"] = f"{base}_{it['n']:02d}{os.path.splitext(path)[1]}"
+                it.update(path=path, size=os.path.getsize(path), status="done", msg="",
+                          method="qualité d'origine" if it["kind"] == "photo" else "")
+            except Exception as e:
+                msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+                it["status"], it["msg"] = "error", msg[:200]
+        done = [i for i in job["items"] if i["status"] == "done"]
+        if not done:
+            raise RuntimeError(job["items"][0]["msg"] if job["items"] else "Rien à télécharger.")
+        job["file"] = os.path.join(BASE, job["id"] + ".zip")
+        with zipfile.ZipFile(job["file"], "w", zipfile.ZIP_STORED) as z:
+            for it in done:
+                z.write(it["path"], it["name"])
+        job["filename"] = f"{base}_{len(done)}_medias.zip"
+        job["zip_size"] = os.path.getsize(job["file"])
+        job["phase"] = "done"
+        print(f"[médias {job['id']}] terminé : {len(done)} fichiers ({site})", flush=True)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        if "Unsupported URL" in msg:
+            msg = "Lien non pris en charge. Colle un lien de post X/Twitter ou TikTok."
+        print(f"[médias {job['id']}] erreur : {msg[:200]}", flush=True)
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        job["finished"] = time.time()
+
+
+@app.post("/api/media")
+def start_media():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    cleanup()
+    url = ((request.get_json(force=True) or {}).get("url") or "").strip()
+    m = re.search(r"https?://\S+", url)
+    if not m:
+        return jsonify(error="Colle le lien complet du post (il commence par https://)."), 400
+    job = {"id": uuid.uuid4().hex[:12], "platform": "media", "source": m.group(0), "url": m.group(0),
+           "limit": 0, "sort": "", "lang": "", "phase": "queued", "items": [], "source_name": "Post",
+           "error": "", "created": time.time(), "zip_size": 0}
+    with LOCK:
+        JOBS[job["id"]] = job
+    threading.Thread(target=run_media_job, args=(job,), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.get("/api/job/<jid>/m/<int:n>")
+def job_media(jid, n):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    it = next((i for i in (j or {}).get("items", []) if i["n"] == n and i["status"] == "done"), None)
+    if not it or not os.path.exists(it.get("path", "")):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance.", 404
+    return send_file(it["path"], as_attachment=request.args.get("dl") == "1", download_name=it["name"], max_age=3600)
 
 
 @app.get("/api/job/<jid>/zip")

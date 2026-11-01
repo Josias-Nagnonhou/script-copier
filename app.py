@@ -754,7 +754,13 @@ def extract_twitter(url):
 
 def pick_img(urls):
     urls = [u for u in urls or [] if u]
-    return next((u for u in urls if re.search(r"\.jpe?g|format=jpe?g", u, re.I)), urls[0] if urls else None)
+
+    def rank(u):
+        for i, pat in enumerate((r"\.jpe?g|format=jpe?g", r"\.png", r"\.webp")):
+            if re.search(pat, u, re.I):
+                return i
+        return 5 if re.search(r"\.hei[cf]|\.avif", u, re.I) else 4
+    return min(urls, key=rank) if urls else None
 
 
 def find_key(obj, key, depth=0):
@@ -898,6 +904,7 @@ def extract_post(url):
 
 
 EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/heic": ".heic",
+       "image/heif": ".heic", "image/avif": ".avif",
        "video/mp4": ".mp4", "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a"}
 
 
@@ -922,16 +929,50 @@ def fetch_media(it, d, referer):
         with open(path, "wb") as f:
             for chunk in r.iter_content(256 * 1024):
                 f.write(chunk)
-    if it["kind"] == "photo" and ext in (".webp", ".heic"):
-        try:  # JPEG : s'ouvre partout et s'enregistre dans la galerie de l'iPhone
-            from PIL import Image
-            jpg = os.path.splitext(path)[0] + ".jpg"
-            Image.open(path).convert("RGB").save(jpg, "JPEG", quality=95, subsampling=0)
-            os.remove(path)
-            path = jpg
+    if it["kind"] == "photo":
+        path = to_jpeg(path)
+    return path
+
+
+def img_kind(path):
+    with open(path, "rb") as f:
+        h = f.read(32)
+    if h[:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    if h[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if h[:4] == b"RIFF" and h[8:12] == b"WEBP":
+        return "webp"
+    if h[4:8] == b"ftyp":
+        return "avif" if b"avi" in h[8:32] else "heic"
+    return "autre"
+
+
+def to_jpeg(path):
+    """Photos en JPEG pleine taille : visibles dans tous les navigateurs et dans la galerie."""
+    kind = img_kind(path)
+    if kind in ("jpeg", "png"):
+        good = os.path.splitext(path)[0] + (".jpg" if kind == "jpeg" else ".png")
+        if good != path:
+            os.replace(path, good)
+        return good
+    try:
+        from PIL import Image
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+            if hasattr(pillow_heif, "register_avif_opener"):
+                pillow_heif.register_avif_opener()
         except Exception:
             pass
-    return path
+        jpg = os.path.splitext(path)[0] + ".jpg"
+        Image.open(path).convert("RGB").save(jpg, "JPEG", quality=95, subsampling=0)
+        if jpg != path:
+            os.remove(path)
+        return jpg
+    except Exception as e:
+        print(f"[médias] conversion impossible ({kind}) : {e}", flush=True)
+        return path
 
 
 def run_media_job(job):

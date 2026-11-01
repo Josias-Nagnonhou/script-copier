@@ -116,6 +116,15 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 .gi figcaption{padding:10px 12px;display:grid;gap:2px}
 .gi figcaption b{font-size:14px}.gi figcaption small{color:var(--muted);font-size:12px}
 .gsave{justify-self:start;margin-top:6px;border:0;cursor:pointer;font-family:var(--body)}
+.gview{display:block;border:0;padding:0;margin:0;background:none;cursor:zoom-in;width:100%}
+.lb{position:fixed;inset:0;z-index:50;background:rgba(8,8,10,.94);display:grid;grid-template-rows:1fr auto;place-items:center;padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(14px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
+.lb[hidden]{display:none}
+.lb img{max-width:100%;max-height:calc(100vh - 130px);max-height:calc(100dvh - 130px);object-fit:contain;border-radius:10px}
+.lbx{position:absolute;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));width:44px;height:44px;border-radius:50%;border:0;background:#222;color:#fff;font-size:18px;cursor:pointer;z-index:2}
+.lbnav{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:64px;border:0;border-radius:14px;background:rgba(255,255,255,.12);color:#fff;font-size:34px;cursor:pointer;z-index:2}
+.lbl{left:max(10px,env(safe-area-inset-left))}.lbr{right:max(10px,env(safe-area-inset-right))}
+.lbbar{display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;color:#ddd;font-weight:700;font-size:14px;padding-top:12px}
+.lbbar .btn{min-width:220px}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:5px;margin:-8px 0 26px;width:max-content;max-width:100%;flex-wrap:wrap}
 .modes button{border:0;background:transparent;color:var(--muted);padding:10px 16px;border-radius:12px;font:800 14px var(--body);cursor:pointer}
@@ -357,6 +366,13 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
   </section>
   </div>
 </div>
+<div class="lb" id="lb" hidden role="dialog" aria-modal="true" aria-label="Aperçu de la photo">
+  <button type="button" class="lbx" id="lbClose" aria-label="Fermer">✕</button>
+  <button type="button" class="lbnav lbl" id="lbPrev" aria-label="Photo précédente">‹</button>
+  <img id="lbImg" alt="">
+  <button type="button" class="lbnav lbr" id="lbNext" aria-label="Photo suivante">›</button>
+  <div class="lbbar"><span id="lbCap"></span><button type="button" class="btn dl" id="lbSave">Enregistrer cette photo</button></div>
+</div>
 <script>
 const $=s=>document.querySelector(s);
 let platform='tiktok',timer=null;
@@ -406,7 +422,7 @@ try{setMode(localStorage.getItem('mode')||'acc')}catch(e){}
 /* ---------- photos / médias d'un post ---------- */
 const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 const MOBILE=IOS||/Android/i.test(navigator.userAgent);
-let mTimer=null,mBusy=false,mFiles=[];
+let mTimer=null,mBusy=false,mFiles=[],mSig='',mItems=[],mJob='';
 function canShareFiles(files){try{return !!(navigator.canShare&&navigator.canShare({files}))}catch(e){return false}}
 function mSetBusy(on){mBusy=on;$('#mGo').classList.toggle('busy',on);$('#mGo').textContent=on?'Kopi récupère…':'Récupérer les médias →';$('#mBar').classList.toggle('live',on)}
 function mErr(m){$('#mState').innerHTML=`<div class="err">${esc(m)}</div>`;mSetBusy(false)}
@@ -423,7 +439,7 @@ $('#mGo').onclick=async()=>{
 function mTile(id,i){
   const src=`/api/job/${id}/m/${i.n}`;
   if(i.status!=='done')return `<figure class="gi gi-wait"><div class="gph">${i.status==='error'?'Échec':'…'}</div><figcaption><b>${esc(i.title)}</b><small>${esc(i.msg)||'en attente'}</small></figcaption></figure>`;
-  const view=i.kind==='photo'?`<img src="${src}" alt="${esc(i.title)}" loading="lazy">`:i.kind==='video'?`<video src="${src}" controls playsinline preload="metadata"></video>`:`<div class="gph aud"><span>♪</span><audio src="${src}" controls preload="none"></audio></div>`;
+  const view=i.kind==='photo'?`<button type="button" class="gview" data-n="${i.n}" aria-label="Voir ${esc(i.title)} en grand"><img src="${src}" alt="${esc(i.title)}" loading="lazy"></button>`:i.kind==='video'?`<video src="${src}" controls playsinline preload="metadata"></video>`:`<div class="gph aud"><span>♪</span><audio src="${src}" controls preload="none"></audio></div>`;
   return `<figure class="gi">${view}<figcaption><b>${esc(i.title)}</b><small>${mo(i.size)}${i.method?' · '+i.method:''}</small><button type="button" class="chip c-sub gsave" data-n="${i.n}">Enregistrer</button></figcaption></figure>`;
 }
 async function mPrefetch(id,items){
@@ -445,7 +461,7 @@ function mWatch(id){
     const items=d.items,ok=items.filter(i=>i.status==='done').length,fin=items.filter(i=>['done','error'].includes(i.status)).length;
     $('#mOk').textContent=ok;$('#mTot').textContent='/'+items.length;
     $('#mFill').style.width=items.length?(fin/items.length*100)+'%':(d.phase==='listing'?'10%':'0');
-    if(items.length){$('#mBox').hidden=false;$('#mTitle').textContent=d.source_name||'Médias';$('#mGal').innerHTML=items.map(i=>mTile(id,i)).join('')}
+    if(items.length){$('#mBox').hidden=false;$('#mTitle').textContent=d.source_name||'Médias';const sig=id+items.map(i=>i.status).join();if(sig!==mSig){mSig=sig;$('#mGal').innerHTML=items.map(i=>mTile(id,i)).join('')}}
     if(!['done','error'].includes(d.phase)){$('#mState').textContent=d.phase==='listing'?'Lecture du post…':`Téléchargement · ${fin}/${items.length}`;return}
     clearInterval(mTimer);mSetBusy(false);
     if(d.phase==='error'){mErr(d.error);return}
@@ -453,7 +469,7 @@ function mWatch(id){
     $('#mState').textContent=`Prêt · ${ok} fichier${ok>1?'s':''} · ${mo(d.zip_size)}`+(IOS?' · préparation pour la galerie…':'');
     $('#mZip').href='/api/job/'+id+'/zip';$('#mZip').setAttribute('aria-disabled','false');$('#mZip').hidden=!MOBILE;
     $('#mSave').textContent=IOS?(photos>1?`Enregistrer les ${photos} dans Photos`:'Enregistrer dans Photos'):MOBILE?'Tout télécharger':'Tout télécharger (ZIP)';
-    $('#mGal').onclick=e=>{const b=e.target.closest('.gsave');if(!b)return;const it=items.find(x=>x.n===+b.dataset.n);mSaveOne(id,it.n,it.name)};
+    mItems=items;mJob=id;
     await mPrefetch(id,items);
     if(IOS)$('#mState').textContent=`Prêt · ${ok} fichier${ok>1?'s':''}. Touche le bouton puis « Enregistrer ${photos>1?photos+' images':"l'image"} ».`;
     $('#mSave').setAttribute('aria-disabled','false');
@@ -467,6 +483,26 @@ function mWatch(id){
   tick();mTimer=setInterval(tick,2000);
 }
 try{const j=localStorage.getItem('mdJob');if(j)mWatch(j)}catch(e){}
+
+$('#mGal').onclick=e=>{
+  const sv=e.target.closest('.gsave'),vw=e.target.closest('.gview');
+  if(sv){const it=mItems.find(x=>x.n===+sv.dataset.n);if(it)mSaveOne(mJob,it.n,it.name);return}
+  if(vw)lbOpen(+vw.dataset.n);
+};
+let lbN=0;
+function lbPhotos(){return mItems.filter(i=>i.status==='done'&&i.kind==='photo')}
+function lbShow(){const ph=lbPhotos(),k=ph.findIndex(x=>x.n===lbN);if(k<0)return;const it=ph[k];
+  $('#lbImg').src=`/api/job/${mJob}/m/${it.n}`;$('#lbImg').alt=it.title;$('#lbCap').textContent=`${it.title} · ${k+1}/${ph.length}`;
+  $('#lbPrev').hidden=k===0;$('#lbNext').hidden=k===ph.length-1}
+function lbOpen(n){if(!mJob)return;lbN=n;$('#lb').hidden=false;document.body.style.overflow='hidden';lbShow();$('#lbClose').focus()}
+function lbClose(){$('#lb').hidden=true;document.body.style.overflow='';$('#lbImg').removeAttribute('src')}
+function lbStep(dir){const ph=lbPhotos(),k=ph.findIndex(x=>x.n===lbN);const nx=ph[k+dir];if(nx){lbN=nx.n;lbShow()}}
+$('#lbClose').onclick=lbClose;$('#lbPrev').onclick=()=>lbStep(-1);$('#lbNext').onclick=()=>lbStep(1);
+$('#lbSave').onclick=()=>{const it=mItems.find(x=>x.n===lbN);if(it)mSaveOne(mJob,it.n,it.name)};
+$('#lb').addEventListener('click',e=>{if(e.target.id==='lb')lbClose()});
+document.addEventListener('keydown',e=>{if($('#lb').hidden)return;if(e.key==='Escape')lbClose();if(e.key==='ArrowLeft')lbStep(-1);if(e.key==='ArrowRight')lbStep(1)});
+let lbX=null;$('#lb').addEventListener('touchstart',e=>{lbX=e.touches[0].clientX},{passive:true});
+$('#lb').addEventListener('touchend',e=>{if(lbX===null)return;const dx=e.changedTouches[0].clientX-lbX;if(Math.abs(dx)>50)lbStep(dx<0?1:-1);lbX=null});
 
 /* ---------- traduction ---------- */
 let tTimer=null,tBusy=false;

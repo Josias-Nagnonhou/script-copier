@@ -757,43 +757,133 @@ def pick_img(urls):
     return next((u for u in urls if re.search(r"\.jpe?g|format=jpe?g", u, re.I)), urls[0] if urls else None)
 
 
+def find_key(obj, key, depth=0):
+    """Cherche récursivement un dict qui contient `key` (structure TikTok changeante)."""
+    if depth > 12:
+        return None
+    if isinstance(obj, dict):
+        if key in obj and obj[key]:
+            return obj
+        vals = obj.values()
+    elif isinstance(obj, list):
+        vals = obj
+    else:
+        return None
+    for v in vals:
+        r = find_key(v, key, depth + 1)
+        if r is not None:
+            return r
+    return None
+
+
+def tt_item_to_media(item):
+    author = (item.get("author") or {})
+    author = author.get("uniqueId") or author.get("unique_id") or "" if isinstance(author, dict) else str(author)
+    desc = item.get("desc") or item.get("title") or ""
+    imgs = (item.get("imagePost") or item.get("image_post_info") or {}).get("images") or []
+    out = []
+    for i in imgs:
+        urls = ((i.get("imageURL") or i.get("display_image") or {}).get("urlList")
+                or (i.get("display_image") or {}).get("url_list") or [])
+        u = pick_img(urls)
+        if u:
+            out.append({"kind": "photo", "url": u})
+    if out:
+        music = (item.get("music") or {})
+        music = music.get("playUrl") or ((music.get("play_url") or {}).get("url_list") or [None])[0]
+        if music:
+            out.append({"kind": "audio", "url": music})
+    return author, desc, out
+
+
 def extract_tiktok(url):
     errors = []
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": UA, "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+                         "Referer": "https://www.tiktok.com/"})
+    # 1) résoudre les liens courts (vt.tiktok.com, vm.tiktok.com)
     try:
-        r = http_get(url, headers={"Referer": "https://www.tiktok.com/"}, allow_redirects=True)
-        url = r.url
-        m = re.search(r'<script[^>]+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', r.text, re.S)
-        if m:
-            item = json.loads(m.group(1))["__DEFAULT_SCOPE__"]["webapp.video-detail"]["itemInfo"]["itemStruct"]
-            author = (item.get("author") or {}).get("uniqueId", "")
-            imgs = (item.get("imagePost") or {}).get("images") or []
-            out = [{"kind": "photo", "url": pick_img((i.get("imageURL") or {}).get("urlList"))} for i in imgs]
-            out = [o for o in out if o["url"]]
-            if out:
-                music = (item.get("music") or {}).get("playUrl")
+        r = sess.get(url, timeout=30, allow_redirects=True)
+        url = r.url.split("?")[0]
+    except Exception as e:
+        errors.append(f"résolution {e}")
+        r = None
+    m = re.search(r"/(?:photo|video)/(\d+)", url)
+    pid = m.group(1) if m else None
+    is_photo = "/photo/" in url
+    pages = [(url, r)]
+    if pid:
+        pages.append((url.replace("/photo/", "/video/"), None))
+    # 2) données intégrées à la page (lien d'origine, puis variante /video/)
+    for u, resp in pages:
+        try:
+            resp = resp if resp is not None and resp.url.split("?")[0] == u else sess.get(u, timeout=30)
+            mm = re.search(r'<script[^>]+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', resp.text, re.S)
+            if not mm:
+                errors.append(f"page {u[-30:]} : {resp.status_code}, {len(resp.text)} o, pas de données")
+                continue
+            data = json.loads(mm.group(1))
+            holder = find_key(data, "imagePost") or find_key(data, "itemStruct")
+            item = holder.get("itemStruct", holder) if holder else None
+            if item:
+                author, desc, out = tt_item_to_media(item)
+                if out:
+                    print(f"[médias] TikTok via page ({len(out)} fichiers)", flush=True)
+                    return author, desc, out
+                if item.get("video") and not is_photo:
+                    return author, desc, [{"kind": "ytdlp", "url": url}]
+            scope = data.get("__DEFAULT_SCOPE__", {})
+            st = [(k, (v or {}).get("statusCode")) for k, v in scope.items() if isinstance(v, dict) and "statusCode" in v]
+            errors.append(f"page {u[-30:]} : clés {list(scope)[:6]} statuts {st[:3]}")
+        except Exception as e:
+            errors.append(f"page {u[-30:]} : {type(e).__name__} {str(e)[:80]}")
+    # 3) API web de TikTok (avec les cookies de la session)
+    if pid:
+        try:
+            j = sess.get("https://www.tiktok.com/api/item/detail/",
+                         params={"itemId": pid, "aid": "1988", "app_language": "fr"}, timeout=30)
+            data = j.json() if j.text.strip() else {}
+            holder = find_key(data, "imagePost") or find_key(data, "itemStruct")
+            item = holder.get("itemStruct", holder) if holder else None
+            if item:
+                author, desc, out = tt_item_to_media(item)
+                if out:
+                    print(f"[médias] TikTok via API web ({len(out)} fichiers)", flush=True)
+                    return author, desc, out
+            errors.append(f"api : {j.status_code}, {len(j.text)} o, statut {data.get('statusCode')}")
+        except Exception as e:
+            errors.append(f"api : {type(e).__name__} {str(e)[:80]}")
+    # 4) services de secours
+    full = url if not pid else f"https://www.tiktok.com/@i/{'photo' if is_photo else 'video'}/{pid}"
+    for name, call in (
+        ("tikwm", lambda: requests.post("https://www.tikwm.com/api/", headers={"User-Agent": UA},
+                                        data={"url": full, "hd": "1", "web": "1"}, timeout=30)),
+        ("tiklydown", lambda: http_get("https://api.tiklydown.eu.org/api/download", params={"url": full})),
+    ):
+        try:
+            resp = call()
+            d = resp.json()
+            d = d.get("data", d) if isinstance(d, dict) else {}
+            imgs = d.get("images") or []
+            urls = [(x if isinstance(x, str) else x.get("url")) for x in imgs]
+            urls = [("https://www.tikwm.com" + u) if u and u.startswith("/") else u for u in urls if u]
+            if urls:
+                out = [{"kind": "photo", "url": u} for u in urls]
+                music = d.get("music")
+                music = music if isinstance(music, str) else (music or {}).get("play_url")
                 if music:
-                    out.append({"kind": "audio", "url": music})
-                return author, item.get("desc", ""), out
-            if item.get("video"):
-                return author, item.get("desc", ""), [{"kind": "ytdlp", "url": url}]
-        errors.append("page sans données")
-    except Exception as e:
-        errors.append(f"page {e}")
-    # secours : tikwm
-    try:
-        d = http_get("https://www.tikwm.com/api/", params={"url": url, "hd": 1}).json().get("data") or {}
-        out = [{"kind": "photo", "url": u} for u in d.get("images") or []]
-        if out:
-            if d.get("music"):
-                out.append({"kind": "audio", "url": d["music"]})
-            return (d.get("author") or {}).get("unique_id", ""), d.get("title", ""), out
-        v = d.get("hdplay") or d.get("play")
-        if v:
-            return (d.get("author") or {}).get("unique_id", ""), d.get("title", ""), [{"kind": "video", "url": v}]
-    except Exception as e:
-        errors.append(f"tikwm {e}")
-    print(f"[médias] TikTok {url} : rien trouvé ({'; '.join(errors)[:300]})", flush=True)
-    return "", "", [{"kind": "ytdlp", "url": url}]
+                    out.append({"kind": "audio", "url": ("https://www.tikwm.com" + music) if music.startswith("/") else music})
+                a = d.get("author") or {}
+                print(f"[médias] TikTok via {name} ({len(out)} fichiers)", flush=True)
+                return (a.get("unique_id") or a.get("unique_id") or "") if isinstance(a, dict) else "", d.get("title", ""), out
+            errors.append(f"{name} : {resp.status_code}, pas d'images ({str(d)[:80]})")
+        except Exception as e:
+            errors.append(f"{name} : {type(e).__name__} {str(e)[:60]}")
+    print(f"[médias] TikTok {url} : rien trouvé | " + " | ".join(errors)[:1500], flush=True)
+    if is_photo:
+        raise RuntimeError("TikTok n'a pas voulu donner les photos de ce post. Réessaie dans une minute ; "
+                           "si ça bloque encore, préviens Claude.")
+    return "", "", [{"kind": "ytdlp", "url": url.replace("/photo/", "/video/")}]
 
 
 def extract_post(url):

@@ -100,7 +100,7 @@ button.pill{border:0;color:var(--ink);font-family:var(--body);cursor:pointer}
 .c-err{background:var(--err-bg);color:var(--err)}.c-wait{background:var(--soft);color:var(--muted)}
 .c-run{background:rgba(255,46,126,.14);color:var(--run);animation:blink 1s infinite}
 @keyframes blink{50%{opacity:.45}}
-@media (max-width:560px){header{flex-wrap:wrap}.right{flex-wrap:wrap;width:100%}.pill{font-size:12px;padding:6px 10px}.modes{width:100%}.modes button{flex:1;padding:10px 8px;font-size:13px}h1{font-size:32px}}
+@media (max-width:560px){header{flex-wrap:wrap}.right{flex-wrap:wrap;width:100%}.pill{font-size:12px;padding:6px 10px}h1{font-size:32px}}
 textarea#tText{width:100%;min-width:0;resize:vertical;padding:14px 16px;border:2px solid var(--ink);border-radius:14px;background:var(--card);color:var(--ink);font:500 15px/1.6 var(--body);min-height:220px}
 textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 .trhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -126,9 +126,14 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 .lbbar{display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;color:#ddd;font-weight:700;font-size:14px;padding-top:12px}
 .lbbar .btn{min-width:220px}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
-.modes{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:5px;margin:-8px 0 26px;width:max-content;max-width:100%;flex-wrap:wrap}
-.modes button{border:0;background:transparent;color:var(--muted);padding:10px 16px;border-radius:12px;font:800 14px var(--body);cursor:pointer}
-.modes button.on{background:var(--lime);color:#111}
+.modes{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px;margin:-8px 0 26px;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.modes::-webkit-scrollbar{display:none}
+.modes button{border:0;background:transparent;color:var(--muted);padding:9px 14px 8px;min-width:76px;border-radius:14px;font:800 12px var(--body);letter-spacing:.01em;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;flex:none;transition:background .2s,color .2s,transform .15s}
+.modes button svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s}
+.modes button:hover{color:var(--ink);background:var(--soft)}
+.modes button:hover svg{transform:translateY(-1px)}
+.modes button.on{background:#111;color:var(--lime);box-shadow:inset 0 0 0 1px rgba(215,255,58,.18)}
+@media (max-width:560px){.modes{width:100%;gap:2px;padding:5px}.modes button{flex:1 1 0;min-width:0;padding:8px 0 7px;font-size:10.5px;letter-spacing:0;border-radius:12px}.modes button svg{width:21px;height:21px}}
 .fdrop{padding:34px 18px;gap:6px}
 .fdrop b{font-size:17px;word-break:break-word}
 .fic{width:48px;height:48px;border-radius:14px;background:var(--ink);color:var(--lime);display:grid;place-items:center;font-size:22px;margin-bottom:6px}
@@ -189,13 +194,13 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
     <p class="ytnote">Le fichier déposé ici reste actif jusqu'au prochain redémarrage du serveur. Pour qu'il reste pour de bon, il faut aussi l'ajouter une fois dans Render (Claude te guide).</p>
   </section>
 
-  <nav class="modes" role="tablist" aria-label="Mode">
-    <button role="tab" id="tabAcc" class="on" aria-selected="true" aria-controls="modeAcc">Comptes TikTok · YouTube</button>
-    <button role="tab" id="tabCl" aria-selected="false" aria-controls="modeCl">✂ Clipping</button>
-    <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile">Fichier audio · vidéo</button>
-    <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl">Télécharger TikTok</button>
-    <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr">Traduire</button>
-    <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd">Photos · posts</button>
+  <nav class="modes" role="tablist" aria-label="Outils">
+    <button role="tab" id="tabAcc" class="on" aria-selected="true" aria-controls="modeAcc" title="Scripts de comptes TikTok et YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg><span>Scripts</span></button>
+    <button role="tab" id="tabCl" aria-selected="false" aria-controls="modeCl" title="Clipping de longues vidéos"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg><span>Clipping</span></button>
+    <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile" title="Transcrire un fichier audio ou vidéo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M18.5 10.5a6.5 6.5 0 0 1-13 0M12 17v4M8.5 21h7"/></svg><span>Transcrire</span></button>
+    <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl" title="Télécharger les vidéos TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5M5 20.5h14"/></svg><span>TikTok</span></button>
+    <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr" title="Traduire un texte"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.6 3.4 2.8 6 6 7.5M11 5c-.7 3.6-3.2 6.6-6.5 8"/><path d="m12.5 21 4-9 4 9M14 17.5h5"/></svg><span>Traduire</span></button>
+    <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd" title="Photos et médias d'un post X ou TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="m21 16-4.5-4.5L7 21"/></svg><span>Photos</span></button>
   </nav>
 
   <div id="modeCl" role="tabpanel" hidden>
@@ -204,13 +209,11 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
       <section class="tile">
         <label for="cUrl">Lien de la vidéo YouTube</label>
         <input id="cUrl" class="bigin" inputmode="url" placeholder="https://www.youtube.com/watch?v=… ou https://youtu.be/…" autocomplete="off">
-        <div class="grid g2">
+        <div class="grid">
           <div><label for="cCount">Nombre de clips</label>
-            <select id="cCount"><option>3</option><option selected>5</option><option>8</option><option>10</option><option>15</option></select></div>
-          <div><label for="cLen">Durée des clips</label>
-            <select id="cLen"><option value="court">15 à 35 s</option><option value="moyen" selected>30 à 60 s</option><option value="long">55 à 90 s</option></select></div>
-          <div><label for="cStyle">Format vertical</label>
-            <select id="cStyle"><option value="blur">Fond flou</option><option value="crop">Plein écran</option></select></div>
+            <select id="cCount"><option value="auto" selected>Auto</option><option>3</option><option>5</option><option>8</option><option>10</option><option>15</option></select></div>
+          <div><label for="cLen">Durée</label>
+            <select id="cLen"><option value="auto" selected>Auto</option><option value="court">15 à 35 s</option><option value="moyen">30 à 60 s</option><option value="long">55 à 90 s</option></select></div>
           <div><label for="cLang">Langue parlée</label>
             <select id="cLang"><option value="">Auto</option><option value="fr" selected>Français</option><option value="en">Anglais</option><option value="ar">Arabe</option><option value="es">Espagnol</option><option value="pt">Portugais</option></select></div>
         </div>
@@ -219,7 +222,7 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
           <label class="check"><input type="checkbox" id="cTitle" checked>Titre en haut du clip</label>
         </div>
         <button class="go" id="cGo">Trouver les moments viraux →</button>
-        <p class="hint">L'IA lit toute la vidéo, garde les passages qui accrochent et qui parlent d'un vrai sujet, puis te les monte en 9:16 pour TikTok, Reels et Shorts. « Fond flou » garde toute l'image (idéal pour les podcasts à 2) ; « Plein écran » recadre au centre.</p>
+        <p class="hint">En « Auto », l'IA garde tous les passages vraiment forts et choisit la bonne durée. Chaque clip commence au début d'une phrase et va jusqu'au bout du message. La vidéo est recadrée en plein écran 9:16 sur le visage de la personne qui parle.</p>
       </section>
       <aside class="tile stat">
         <span class="lbl">Clips prêts</span>
@@ -486,17 +489,17 @@ try{setMode(localStorage.getItem('mode')||'acc')}catch(e){}
 /* ---------- clipping ---------- */
 let cTimer=null,cBusy=false,cSig='',cData=null,cJob='';
 function ts(t){t=Math.max(0,Math.floor(t));const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return (h?h+':'+String(m).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(s).padStart(2,'0')}
-try{const p=JSON.parse(localStorage.getItem('clipPrefs')||'{}');['cCount','cLen','cStyle','cLang'].forEach(k=>{if(p[k]!=null)$('#'+k).value=p[k]});['cSubs','cTitle'].forEach(k=>{if(p[k]!=null)$('#'+k).checked=p[k]})}catch(e){}
+try{const p=JSON.parse(localStorage.getItem('clipPrefs2')||'{}');['cCount','cLen','cLang'].forEach(k=>{if(p[k]!=null)$('#'+k).value=p[k]});['cSubs','cTitle'].forEach(k=>{if(p[k]!=null)$('#'+k).checked=p[k]})}catch(e){}
 function cSetBusy(on){cBusy=on;$('#cGo').classList.toggle('busy',on);$('#cGo').textContent=on?'Kopi cherche les pépites…':'Trouver les moments viraux →';$('#cBar').classList.toggle('live',on)}
 function cErr(m){$('#cState').innerHTML=`<div class="err">${esc(m)}</div>`;cSetBusy(false)}
 $('#cUrl').addEventListener('keydown',e=>{if(e.key==='Enter')$('#cGo').click()});
 $('#cGo').onclick=async()=>{
   if(cBusy)return;
   const url=$('#cUrl').value.trim();if(!url){$('#cUrl').focus();return}
-  const p={cCount:$('#cCount').value,cLen:$('#cLen').value,cStyle:$('#cStyle').value,cLang:$('#cLang').value,cSubs:$('#cSubs').checked,cTitle:$('#cTitle').checked};
-  try{localStorage.setItem('clipPrefs',JSON.stringify(p))}catch(e){}
+  const p={cCount:$('#cCount').value,cLen:$('#cLen').value,cLang:$('#cLang').value,cSubs:$('#cSubs').checked,cTitle:$('#cTitle').checked};
+  try{localStorage.setItem('clipPrefs2',JSON.stringify(p))}catch(e){}
   cSetBusy(true);['#cZip','#cCopy'].forEach(s=>$(s).setAttribute('aria-disabled','true'));$('#cBox').hidden=true;$('#cOk').textContent='0';$('#cTot').textContent='/0';$('#cFill').style.width='3%';cSig='';
-  try{const r=await fetch('/api/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,count:+p.cCount,length:p.cLen,style:p.cStyle,lang:p.cLang,subs:p.cSubs,title:p.cTitle})});
+  try{const r=await fetch('/api/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,count:p.cCount,length:p.cLen,lang:p.cLang,subs:p.cSubs,title:p.cTitle})});
     const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('clipJob',d.job_id)}catch(e){}cWatch(d.job_id)}
   catch(e){cErr(e.message)}
 };
@@ -531,7 +534,7 @@ function cWatch(id){
     const dur=d.duration?` · vidéo de ${fmtDur(d.duration)}`:'';
     if(!['done','error'].includes(d.phase)){
       const lbl={queued:'En attente…',listing:'Lecture de la vidéo…',transcribing:(d.msg||'Récupération du texte…')+dur,
-        analyzing:(d.msg||'Analyse IA…')+dur,rendering:`Montage des clips · ${fin}/${ms.length} · environ 1 à 3 min par clip`}[d.phase];
+        analyzing:(d.msg||'Analyse IA…')+dur,rendering:`Cadrage et montage des clips · ${fin}/${ms.length} · environ 2 à 4 min par clip`}[d.phase];
       $('#cState').textContent=lbl||d.msg;return}
     clearInterval(cTimer);cSetBusy(false);
     if(d.phase==='error'){cErr(d.error);if(/cookies/i.test(d.error))fetch('/api/cookies').then(r=>r.json()).then(c=>{ytState(c.status);ytOpen(true)}).catch(()=>{});return}

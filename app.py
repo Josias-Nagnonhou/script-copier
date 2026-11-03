@@ -1256,7 +1256,9 @@ def cookies_upload():
 
 
 # ------------------------------------------------ clipping : moments viraux d'une longue vidéo
-CLIP_LENGTHS = {"court": (15, 35), "moyen": (30, 60), "long": (55, 90)}
+# durée visée (min, max) : c'est une cible, le clip va toujours jusqu'à la fin de la phrase
+CLIP_LENGTHS = {"auto": (20, 90), "court": (15, 35), "moyen": (30, 60), "long": (55, 90)}
+AUTO_MIN_SCORE, AUTO_MAX = 75, 15
 CLIP_W, CLIP_H = 720, 1280
 FONTS_DIR = os.path.join(app.root_path, "fonts")
 FF_THREADS = os.environ.get("FFMPEG_THREADS", "2")
@@ -1334,20 +1336,29 @@ def groq_words(path, lang):
     raise RuntimeError("Limite Groq atteinte, réessaie plus tard.")
 
 
-def build_lines(words):
-    """Regroupe les mots en lignes courtes horodatées (phrases ou ~9 s)."""
-    lines, cur = [], []
-    for w in words:
-        if cur and (w[0] - cur[-1][1] > 1.5 or w[0] - cur[0][0] >= 9):
-            lines.append(cur)
-            cur = []
-        cur.append(w)
-        if re.search(r"[.!?…]$", w[2]) and w[1] - cur[0][0] >= 2.5:
-            lines.append(cur)
-            cur = []
-    if cur:
-        lines.append(cur)
-    return [{"s": l[0][0], "e": l[-1][1], "text": " ".join(x[2] for x in l)} for l in lines]
+def sentence_ends(words):
+    """ends[k] = vrai si on peut couper juste après le mot k sans couper une phrase :
+    ponctuation de fin, ou vraie pause dans la parole (les sous-titres auto n'ont pas de points)."""
+    punct = sum(bool(re.search(r"[.!?…]$", w[2])) for w in words) > len(words) / 60
+    pause = 0.8 if punct else 0.45
+    ends = []
+    for k, w in enumerate(words):
+        gap = words[k + 1][0] - w[1] if k + 1 < len(words) else 99
+        ends.append(gap >= pause or (punct and bool(re.search(r"[.!?…]$", w[2])) and gap >= 0.05))
+    return ends
+
+
+def build_lines(words, ends):
+    """Lignes horodatées qui finissent toujours sur une fin de phrase ou une pause."""
+    lines, i = [], 0
+    for k, w in enumerate(words):
+        dur = w[1] - words[i][0]
+        gap = words[k + 1][0] - w[1] if k + 1 < len(words) else 99
+        if (ends[k] and dur >= 2.5) or (dur >= 14 and gap >= 0.25) or dur >= 20 or k == len(words) - 1:
+            lines.append({"s": words[i][0], "e": w[1], "wi": i, "wj": k,
+                          "text": " ".join(x[2] for x in words[i:k + 1])})
+            i = k + 1
+    return lines
 
 
 def clip_transcript(job, info, tmp):
@@ -1407,28 +1418,40 @@ def parse_json_obj(txt):
             return {}
 
 
-def clip_prompt(mn, mx):
+def clip_prompt(job):
+    mn, mx = CLIP_LENGTHS[job["length"]]
+    if job["length"] == "auto":
+        duree = (f"- dure le temps qu'il faut pour que le moment soit complet et percutant : choisis toi-même la durée "
+                 f"idéale, entre {mn} et {mx} secondes (calcule avec les heures des lignes) ;\n")
+    else:
+        duree = (f"- dure environ {mn} à {mx} secondes (calcule avec les heures des lignes). C'est une cible, pas une limite : "
+                 "le clip doit TOUJOURS aller jusqu'au bout de la phrase et de l'idée en cours. Mieux vaut dépasser de "
+                 "15 ou 20 secondes que couper quelqu'un au milieu de ce qu'il dit ;\n")
+    combien = ("Propose tous les passages vraiment forts de cet extrait, au maximum 5"
+               if job["count"] == "auto" else "Maximum 4 clips dans cet extrait")
     return (
         "Tu es un monteur expert en clips viraux pour TikTok, Reels et YouTube Shorts. On te donne un extrait "
         "horodaté de la transcription d'une longue vidéo (podcast, conférence, interview, prêche, débat…). "
-        "Chaque ligne commence par son numéro, puis l'heure où elle est dite.\n\n"
+        "Chaque ligne commence par son numéro, puis l'heure où elle est dite. Chaque ligne se termine sur une "
+        "pause ou une fin de phrase.\n\n"
         "Ta mission : repérer les passages qui feraient d'excellents clips courts, capables de devenir viraux.\n"
         "Un bon clip :\n"
-        "- commence par une phrase forte qui accroche dès les 3 premières secondes (question, affirmation choc, "
+        "- commence au début d'une phrase forte qui accroche dès les 3 premières secondes (question, affirmation choc, "
         "début d'histoire, vérité qui dérange), jamais par « euh », « donc », « et », une fin de phrase ou une salutation ;\n"
         "- parle d'un vrai sujet de fond : une idée forte, une leçon, une histoire, un conseil concret, une révélation, "
         "une émotion forte, une punchline, un désaccord ;\n"
         "- se comprend tout seul, sans avoir vu le reste de la vidéo ;\n"
-        "- se termine sur une conclusion, une chute ou une phrase marquante, jamais au milieu d'une idée ;\n"
-        f"- dure entre {mn} et {mx} secondes (calcule avec les heures des lignes).\n"
+        "- se termine quand la personne a fini son message : sur une conclusion, une chute ou une phrase marquante. "
+        "Jamais au milieu d'une phrase, d'une explication ou d'une histoire ;\n"
+        + duree +
         "À éviter absolument : introductions, présentation des invités, remerciements, appels à s'abonner, "
         "publicités et partenariats, logistique, passages flous, bavardage sans fond.\n\n"
         "Note chaque clip de 0 à 100 selon son potentiel viral (90 et plus : exceptionnel, 75-89 : très bon, "
-        "60-74 : correct). Ne propose rien en dessous de 60. Mieux vaut 0 ou 1 clip excellent que 4 moyens. "
-        "Maximum 4 clips dans cet extrait, qui ne se chevauchent pas.\n\n"
+        "60-74 : correct). Sois exigeant et honnête. Ne propose rien en dessous de 60. Mieux vaut 0 ou 1 clip "
+        f"excellent que 4 moyens. {combien}, qui ne se chevauchent pas.\n\n"
         "Réponds UNIQUEMENT avec un objet JSON, sans aucun texte autour, au format :\n"
         '{"clips":[{"debut":12,"fin":19,"score":87,"titre":"...","accroche":"...","pourquoi":"...","type":"..."}]}\n'
-        "- debut : numéro de la ligne où le clip commence ; fin : numéro de la dernière ligne incluse ;\n"
+        "- debut : numéro de la ligne où le clip commence ; fin : numéro de la ligne où la personne termine son message ;\n"
         "- titre : titre court et percutant en français pour publier le clip (70 caractères maximum, sans hashtag) ;\n"
         "- accroche : la première phrase du clip, telle qu'elle est dite ;\n"
         "- pourquoi : en une phrase en français, pourquoi ce passage peut devenir viral ;\n"
@@ -1436,17 +1459,47 @@ def clip_prompt(mn, mx):
         'S\'il n\'y a aucun bon passage, réponds {"clips":[]}.')
 
 
-def fit_moment(lines, ld, lf, mn, mx):
-    """Ajuste début/fin sur les lignes pour respecter la durée voulue."""
-    while lf > ld and lines[lf]["e"] - lines[ld]["s"] > mx + 5:
-        lf -= 1
-    while (lines[lf]["e"] - lines[ld]["s"] < mn and lf + 1 < len(lines)
-           and lines[lf + 1]["e"] - lines[ld]["s"] <= mx + 5 and lines[lf + 1]["s"] - lines[lf]["e"] < 2.5):
-        lf += 1
-    return ld, lf, max(0.0, lines[ld]["s"] - 0.15), lines[lf]["e"] + 0.35
+def fit_moment(words, ends, wi, wj, mn, mx):
+    """Cale le début au début d'une phrase et la fin à la fin du message en cours.
+    La durée choisie est une cible : on ne coupe jamais quelqu'un en pleine phrase pour la respecter."""
+    n = len(words)
+    cap = max(mx * 1.5, mx + 25)
+
+    def dur(a, b):
+        return words[b][1] - words[a][0]
+
+    # début : remonter au début de la phrase si l'IA a démarré en plein milieu
+    k = wi
+    while k > 0 and not ends[k - 1] and words[wi][0] - words[k - 1][0] < 6:
+        k -= 1
+    if k == 0 or ends[k - 1]:
+        wi = k
+    # fin : aller jusqu'au bout de la phrase en cours
+    k = wj
+    while not ends[k] and k + 1 < n and words[k + 1][1] - words[wj][1] < 15:
+        k += 1
+    wj = k
+    # beaucoup trop long : revenir à une fin de phrase plus tôt (jamais en dessous de la durée minimale)
+    if dur(wi, wj) > cap:
+        ok = [k for k in range(wi, wj) if ends[k] and mn <= dur(wi, k) <= cap]
+        if ok:
+            wj = ok[-1]
+    # trop court : ajouter la phrase suivante tant que la personne continue de parler
+    while dur(wi, wj) < mn and wj + 1 < n and words[wj + 1][0] - words[wj][1] < 2.5:
+        k = wj + 1
+        while not ends[k] and k + 1 < n:
+            k += 1
+        if dur(wi, k) > mx + 10:
+            break
+        wj = k
+    gap_b = words[wi][0] - words[wi - 1][1] if wi > 0 else 1.0
+    gap_a = words[wj + 1][0] - words[wj][1] if wj + 1 < n else 1.0
+    s = max(0.0, words[wi][0] - min(0.3, max(0.05, gap_b * 0.6)))
+    e = words[wj][1] + min(0.7, max(0.2, gap_a * 0.6))
+    return wi, wj, s, e
 
 
-def find_moments(job, lines):
+def find_moments(job, words, ends, lines):
     mn, mx = CLIP_LENGTHS[job["length"]]
     total = lines[-1]["e"]
     windows, ws = [], 0.0
@@ -1457,7 +1510,7 @@ def find_moments(job, lines):
         if ws + WINDOW >= total:
             break
         ws += STEP
-    system = clip_prompt(mn, mx)
+    system = clip_prompt(job)
     found = []
     job["parts"] = len(windows)
     for k, idx in enumerate(windows, 1):
@@ -1479,7 +1532,7 @@ def find_moments(job, lines):
             if not (idx[0] <= ld <= idx[-1]) or score < 55:
                 continue
             lf = max(ld, min(lf, len(lines) - 1))
-            ld, lf, s, e = fit_moment(lines, ld, lf, mn, mx)
+            wi, wj, s, e = fit_moment(words, ends, lines[ld]["wi"], lines[lf]["wj"], mn, mx)
             if e - s < max(8, mn * 0.5):
                 continue
             found.append({"s": round(s, 2), "e": round(e, 2), "score": min(score, 100),
@@ -1493,9 +1546,11 @@ def find_moments(job, lines):
     for m in found:  # pas de doublons entre tranches qui se chevauchent
         if all(min(m["e"], o["e"]) - max(m["s"], o["s"]) < 0.3 * min(m["e"] - m["s"], o["e"] - o["s"]) for o in kept):
             kept.append(m)
-        if len(kept) >= job["count"]:
-            break
-    return kept
+    if job["count"] == "auto":
+        best = [m for m in kept if m["score"] >= AUTO_MIN_SCORE][:AUTO_MAX]
+        # vidéo faible : on garde quand même les 2 ou 3 meilleurs passages corrects
+        return best if len(best) >= 2 else [m for m in kept if m["score"] >= 65][:3] or kept[:1]
+    return kept[:job["count"]]
 
 
 def ass_text(t):
@@ -1549,38 +1604,168 @@ def clip_ass(words, m, job, path):
 
 
 def clip_sources(job):
-    h = 1080 if job["style"] == "crop" else 720
+    h = 720 if job["style"] == "blur" else 1080  # recadrage : source en 1080p pour garder une image nette
     fmt = (f"bv*[height<={h}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<={h}][vcodec^=avc1]+ba/"
            f"bv*[height<={h}]+ba/b[height<={h}]/b")
     with yt_dlp.YoutubeDL(ydl_opts(job["site"], format=fmt, skip_download=True)) as y:
         info = y.extract_info(job["url"], download=False)
     fs = info.get("requested_formats") or [info]
-    return [(f["url"], f.get("http_headers") or {}) for f in fs if f.get("url")]
+    v = next((f for f in fs if f.get("vcodec") not in (None, "none")), fs[0])
+    srcs = [(f["url"], f.get("http_headers") or {}) for f in fs if f.get("url")]
+    return srcs, int(v.get("width") or info.get("width") or 0), int(v.get("height") or info.get("height") or 0)
 
 
-def render_clip(job, m, path, srcs):
+def ff_input(u, hd, s, d, extra=()):
+    a = []
+    if u.startswith("http"):
+        a += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+        if hd:
+            a += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in hd.items())]
+    return a + list(extra) + ["-ss", f"{s:.3f}", "-t", f"{d:.3f}", "-i", u]
+
+
+def sample_frames(src, s, d, keyonly, sw=480):
+    """Petites images couleur du passage, avec leur heure."""
+    import numpy as np
+    extra = ["-skip_frame", "nokey"] if keyonly else []
+    vf = ("" if keyonly else "fps=2,") + f"scale={sw}:-2,showinfo"
+    cmd = (["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info"] + ff_input(src[0], src[1], s, d, extra)
+           + ["-an", "-vf", vf, "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"])
+    r = subprocess.run(cmd, capture_output=True, timeout=1200)
+    times = [float(x) for x in re.findall(rb"pts_time:\s*([-\d.]+)", r.stderr)]
+    if not times or not r.stdout:
+        return []
+    sh = len(r.stdout) // (sw * 3 * len(times))
+    if sh < 10:
+        return []
+    arr = np.frombuffer(r.stdout[:sw * sh * 3 * len(times)], dtype=np.uint8).reshape(len(times), sh, sw, 3)
+    return list(zip(times, arr))
+
+
+FACE = {}
+FACE_MODEL = os.path.join(app.root_path, "models", "face_yunet.onnx")
+
+
+def detect_faces(img):
+    """Visages (x, y, l, h) dans une petite image couleur, détecteur YuNet (repère aussi les profils)."""
+    import cv2
+    h, w = img.shape[:2]
+    if "yn" not in FACE:
+        FACE["yn"] = cv2.FaceDetectorYN.create(FACE_MODEL, "", (w, h), 0.6, 0.3, 50)
+    FACE["yn"].setInputSize((w, h))
+    _, res = FACE["yn"].detect(img)
+    if res is None:
+        return []
+    return [(int(r[0]), int(r[1]), int(r[2]), int(r[3])) for r in res if r[2] * r[3] >= (h / 18) ** 2]
+
+
+def face_track(job, m, src, vw, vh):
+    """Positions du cadre 9:16 au fil du clip : il suit le visage le plus visible,
+    saute d'un coup aux changements de plan et glisse en douceur quand la personne bouge."""
+    import numpy as np
+    import cv2
+    cw = int(vh * 9 / 16) // 2 * 2
+    maxx = vw - cw
+    center = maxx / 2
+    d = m["e"] - m["s"]
+    frames = sample_frames(src, m["s"], d, keyonly=True)
+    if len(frames) < max(4, d / 4):  # images clés trop rares : on échantillonne 2 images par seconde
+        frames = sample_frames(src, m["s"], d, keyonly=False)
+    if not frames:
+        return cw, [(0.0, center, 0.0)], 0
+    sw = frames[0][1].shape[1]
+    k = vw / sw
+    keys, cur, pending, prev, prevg, seen = [], None, None, None, None, 0
+    for t, img in frames:
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        hist = cv2.calcHist([g], [0], None, [32], [0, 256])
+        cv2.normalize(hist, hist)
+        # changement de plan = toute l'image change (pas seulement la personne qui bouge)
+        cut = prev is not None and (cv2.compareHist(prev, hist, cv2.HISTCMP_CORREL) < 0.7 or
+                                    float(np.mean(np.abs(g.astype(np.int16) - prevg.astype(np.int16)))) > 60)
+        prev, prevg = hist, g
+        faces = detect_faces(img)
+        if not faces:
+            continue
+        seen += 1
+        big = max(w * h for _, _, w, h in faces)
+        cand = [f for f in faces if f[2] * f[3] >= 0.6 * big]
+        if cur is not None and not cut:  # deux visages aussi visibles : on reste sur celui qu'on filme
+            pick = min(cand, key=lambda f: abs((f[0] + f[2] / 2) * k - (cur + cw / 2)))
+        else:
+            pick = max(cand, key=lambda f: f[2] * f[3])
+        x = min(max((pick[0] + pick[2] / 2) * k - cw / 2, 0), maxx)
+        t = max(0.0, t)
+        if cur is None:
+            cur = x
+            keys.append((0.0, x, 0.0))
+            continue
+        if abs(x - cur) < 0.06 * vw:
+            pending = None
+            continue
+        if cut:
+            keys.append((t, x, 0.0))
+            cur, pending = x, None
+        elif pending and (x - cur) * (pending[1] - cur) > 0:  # la personne s'est bien déplacée : on glisse
+            keys.append((pending[0], x, min(max(0.6, t - pending[0]), 2.5)))
+            cur, pending = x, None
+        else:
+            pending = (t, x)
+    if not keys:
+        keys = [(0.0, center, 0.0)]
+    clean = []
+    for kk in sorted(keys):
+        if clean and kk[0] - clean[-1][0] < 0.7:
+            clean[-1] = (clean[-1][0], kk[1], clean[-1][2])
+        else:
+            clean.append(kk)
+    return cw, clean[:60], seen
+
+
+def x_expr(keys):
+    """Expression ffmpeg de la position x du cadre en fonction du temps t."""
+    def seg(i):
+        t, x, p = keys[i]
+        if p <= 0 or i == 0:
+            return f"{x:.1f}"
+        x0 = keys[i - 1][1]
+        return f"if(lt(t,{t + p:.3f}),{x0:.1f}+({x - x0:.1f})*(t-{t:.3f})/{p:.3f},{x:.1f})"
+    expr = seg(len(keys) - 1)
+    for i in range(len(keys) - 2, -1, -1):
+        expr = f"if(lt(t,{keys[i + 1][0]:.3f}),{seg(i)},{expr})"
+    return expr
+
+
+def render_clip(job, m, path, src_info):
+    srcs, vw, vh = src_info
     d = m["e"] - m["s"]
     ass = os.path.join(job["dir"], f"c{m['n']:02d}.ass")
     clip_ass(job["words"], m, job, ass)
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-nostdin"]
-    for u, hd in srcs:
-        if u.startswith("http"):
-            cmd += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
-            if hd:
-                cmd += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in hd.items())]
-        cmd += ["-ss", f"{m['s']:.3f}", "-t", f"{d:.3f}", "-i", u]
     W, H = CLIP_W, CLIP_H
     if job["style"] == "blur":
         fc = (f"[0:v]scale={W}:-2,setsar=1,split[a][b];"
               f"[a]scale=144:256:force_original_aspect_ratio=increase,crop=144:256,boxblur=6:2,"
               f"scale={W}:{H},eq=brightness=-0.12:saturation=1.2[bg];"
               f"[bg][b]overlay=(W-w)/2:(H-h)/2,fps=30")
-    else:
+    elif vw and vh and vw * 16 > vh * 9 + 16:  # vidéo horizontale : cadrage intelligent sur le visage
+        m["msg"] = "Repérage des visages…"
+        try:
+            cw, keys, seen = face_track(job, m, srcs[0], vw, vh)
+        except Exception as e:
+            print(f"[clip {job['id']}] repérage des visages raté : {str(e)[:200]}", flush=True)
+            cw, keys, seen = int(vh * 9 / 16) // 2 * 2, [(0.0, (vw - int(vh * 9 / 16) // 2 * 2) / 2, 0.0)], 0
+        print(f"[clip {job['id']}] clip {m['n']} : {seen} images avec visage, {len(keys)} positions de cadre", flush=True)
+        m["msg"] = "Montage…"
+        fc = (f"[0:v]crop={cw}:{vh}:x='{x_expr(keys)}':y=0,scale={W}:{H}:flags=lanczos,setsar=1,fps=30")
+    else:  # vidéo déjà verticale (ou taille inconnue) : on remplit l'écran
         fc = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps=30"
     fc += f",ass=filename={ass}:fontsdir={FONTS_DIR},format=yuv420p[v]"
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-nostdin"]
+    for u, hd in srcs:
+        cmd += ff_input(u, hd, m["s"], d)
     audio = "1:a:0" if len(srcs) > 1 else "0:a:0?"
     cmd += ["-filter_complex", fc, "-map", "[v]", "-map", audio,
-            "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-movflags", "+faststart",
             "-threads", FF_THREADS, "-t", f"{d:.3f}", path]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)
@@ -1589,7 +1774,7 @@ def render_clip(job, m, path, srcs):
 
 
 def run_clip_job(job):
-    print(f"[clip {job['id']}] {job['url']} ({job['count']} clips, {job['length']}, {job['style']})", flush=True)
+    print(f"[clip {job['id']}] {job['url']} (clips : {job['count']}, {job['length']}, {job['style']})", flush=True)
     tmp = tempfile.mkdtemp(dir=BASE)
     try:
         job["phase"], job["msg"] = "listing", "Lecture de la vidéo…"
@@ -1611,9 +1796,10 @@ def run_clip_job(job):
         if len(words) < 40:
             raise RuntimeError("Pas assez de paroles dans cette vidéo pour trouver des moments forts.")
         job["words"] = words
-        lines = build_lines(words)
+        ends = sentence_ends(words)
+        lines = build_lines(words, ends)
         job["phase"] = "analyzing"
-        moments = find_moments(job, lines)
+        moments = find_moments(job, words, ends, lines)
         if not moments:
             raise RuntimeError("L'IA n'a trouvé aucun passage assez fort dans cette vidéo. Essaie une autre durée de clip.")
         for n, m in enumerate(moments, 1):
@@ -1672,14 +1858,14 @@ def start_clip():
         return jsonify(error="Un clipping est déjà en cours. Attends qu'il se termine."), 409
     url = m.group(0)
     try:
-        count = max(1, min(int(d.get("count") or 5), 15))
-    except ValueError:
-        count = 5
+        count = "auto" if d.get("count") in (None, "", "auto") else max(1, min(int(d.get("count")), 15))
+    except (TypeError, ValueError):
+        count = "auto"
     jid = uuid.uuid4().hex[:12]
     job = {"id": jid, "platform": "clip", "url": url, "source": url,
            "site": "youtube" if re.search(r"youtu\.?be", url) else "other",
-           "count": count, "length": d.get("length") if d.get("length") in CLIP_LENGTHS else "moyen",
-           "style": "crop" if d.get("style") == "crop" else "blur",
+           "count": count, "length": d.get("length") if d.get("length") in CLIP_LENGTHS else "auto",
+           "style": "blur" if d.get("style") == "blur" else "smart",
            "subs": d.get("subs", True) is not False, "show_title": d.get("title", True) is not False,
            "lang": (d.get("lang") or "").strip()[:5], "phase": "queued", "msg": "En attente…", "error": "",
            "title": "", "duration": 0, "vid": "", "method": "", "part": 0, "parts": 0, "moments": [],

@@ -406,7 +406,7 @@ def cleanup():
     with LOCK:
         for jid in list(JOBS):
             j = JOBS[jid]
-            keep = 2 * 3600 if j["platform"] in ("download", "media") else 6 * 3600
+            keep = {"download": 2, "media": 2, "clip": 3}.get(j["platform"], 6) * 3600
             if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
@@ -1253,6 +1253,486 @@ def cookies_upload():
         return jsonify(error="Ce fichier ne contient pas de cookies YouTube. Exporte-le depuis youtube.com avec l'extension."), 400
     install_yt_cookies(text, "upload")
     return jsonify(status="ok")
+
+
+# ------------------------------------------------ clipping : moments viraux d'une longue vidéo
+CLIP_LENGTHS = {"court": (15, 35), "moyen": (30, 60), "long": (55, 90)}
+CLIP_W, CLIP_H = 720, 1280
+FONTS_DIR = os.path.join(app.root_path, "fonts")
+FF_THREADS = os.environ.get("FFMPEG_THREADS", "2")
+WINDOW, STEP = 600, 510  # analyse par tranches de 10 min qui se chevauchent
+
+
+def fmt_ts(t):
+    t = int(max(0, t))
+    h, m, s = t // 3600, t % 3600 // 60, t % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def clean_words(words):
+    """[début, fin, mot] triés, fins bornées par le mot suivant, sans [Musique] & co."""
+    words = [w for w in words if w[2] and not re.fullmatch(r"[\[(].*[\])]|>>|-", w[2])]
+    words.sort(key=lambda w: w[0])
+    for i, w in enumerate(words):
+        nxt = words[i + 1][0] if i + 1 < len(words) else w[0] + 1.0
+        end = w[1] if w[1] and w[1] > w[0] else w[0] + 0.6
+        w[1] = max(w[0] + 0.05, min(end, nxt, w[0] + 1.5))
+    return words
+
+
+def words_from_json3(raw):
+    data = json.loads(raw)
+    words = []
+    for ev in data.get("events", []):
+        segs = ev.get("segs") or []
+        t0 = (ev.get("tStartMs") or 0) / 1000
+        dur = (ev.get("dDurationMs") or 0) / 1000
+        for k, s in enumerate(segs):
+            ws = (s.get("utf8") or "").split()
+            if not ws:
+                continue
+            a = t0 + (s.get("tOffsetMs") or 0) / 1000
+            b = t0 + (segs[k + 1].get("tOffsetMs") or 0) / 1000 if k + 1 < len(segs) else t0 + (dur or 2.0)
+            if b <= a:
+                b = a + 0.35 * len(ws)
+            step = (b - a) / len(ws)
+            words += [[a + i * step, a + (i + 1) * step, w] for i, w in enumerate(ws)]
+    return clean_words(words)
+
+
+def groq_words(path, lang):
+    """Transcription Whisper avec l'heure de chaque mot."""
+    data = {"model": GROQ_MODEL, "response_format": "verbose_json", "temperature": "0",
+            "timestamp_granularities[]": ["word", "segment"]}
+    if lang:
+        data["language"] = lang
+    for attempt in range(6):
+        with open(path, "rb") as f:
+            r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
+                              headers={"Authorization": f"Bearer {GROQ_KEY}"},
+                              data=data, files={"file": (os.path.basename(path), f)}, timeout=300)
+        if r.status_code == 200:
+            j = r.json()
+            ws = [[w["start"], w["end"], (w.get("word") or "").strip()] for w in j.get("words") or []]
+            if not ws:  # pas de mots : on répartit le texte de chaque segment
+                for sg in j.get("segments") or []:
+                    t = (sg.get("text") or "").split()
+                    if t:
+                        st = (sg["end"] - sg["start"]) / len(t)
+                        ws += [[sg["start"] + i * st, sg["start"] + (i + 1) * st, x] for i, x in enumerate(t)]
+            return ws
+        if r.status_code in (429, 500, 502, 503):
+            try:
+                wait = float(r.headers.get("retry-after"))
+            except (TypeError, ValueError):
+                wait = 15 * (attempt + 1)
+            time.sleep(min(max(wait, 3), 120))
+            continue
+        if r.status_code == 401:
+            raise RuntimeError("Clé Groq invalide.")
+        raise RuntimeError(f"Groq a répondu {r.status_code} : {r.text[:150]}")
+    raise RuntimeError("Limite Groq atteinte, réessaie plus tard.")
+
+
+def build_lines(words):
+    """Regroupe les mots en lignes courtes horodatées (phrases ou ~9 s)."""
+    lines, cur = [], []
+    for w in words:
+        if cur and (w[0] - cur[-1][1] > 1.5 or w[0] - cur[0][0] >= 9):
+            lines.append(cur)
+            cur = []
+        cur.append(w)
+        if re.search(r"[.!?…]$", w[2]) and w[1] - cur[0][0] >= 2.5:
+            lines.append(cur)
+            cur = []
+    if cur:
+        lines.append(cur)
+    return [{"s": l[0][0], "e": l[-1][1], "text": " ".join(x[2] for x in l)} for l in lines]
+
+
+def clip_transcript(job, info, tmp):
+    """Mots horodatés : sous-titres YouTube d'abord, sinon transcription IA."""
+    if job["site"] == "youtube":
+        cap = pick_caption(info, job["lang"])
+        if cap:
+            url = cap[0] if cap[1] == "json3" else re.sub(r"([?&]fmt=)[^&]*", r"\1json3", cap[0])
+            if "fmt=json3" not in url:
+                url += "&fmt=json3"
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts("youtube")) as y:
+                    raw = y.urlopen(url).read().decode("utf-8", "ignore")
+                words = words_from_json3(raw)
+                if len(words) > 30:
+                    job["method"] = "sous-titres"
+                    return words
+            except Exception as e:
+                print(f"[clip {job['id']}] sous-titres illisibles : {str(e)[:120]}", flush=True)
+    if not GROQ_KEY:
+        raise RuntimeError("Cette vidéo n'a pas de sous-titres et la clé Groq n'est pas configurée.")
+    job["msg"] = "Téléchargement du son…"
+    opts = ydl_opts(job["site"], format="bestaudio/worst[ext=mp4]/worst/best",
+                    outtmpl=os.path.join(tmp, "media.%(ext)s"))
+    with yt_dlp.YoutubeDL(opts) as y:
+        y.extract_info(job["url"], download=True)
+    media = [p for p in glob.glob(os.path.join(tmp, "media.*")) if not p.endswith(".part")]
+    if not media:
+        raise RuntimeError("Téléchargement du son impossible.")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", media[0], "-vn", "-ac", "1", "-ar", "16000",
+                    "-b:a", "32k", "-f", "segment", "-segment_time", "600",
+                    os.path.join(tmp, "part_%03d.mp3")], check=True)
+    os.remove(media[0])
+    parts = sorted(glob.glob(os.path.join(tmp, "part_*.mp3")))
+    if not parts:
+        raise RuntimeError("Cette vidéo n'a pas de son.")
+    words, offset = [], 0.0
+    for i, p in enumerate(parts, 1):
+        job["msg"] = f"Transcription IA · partie {i}/{len(parts)}"
+        words += [[a + offset, b + offset, w] for a, b, w in groq_words(p, job["lang"])]
+        offset += probe_duration(p) or 600
+        os.remove(p)
+    job["method"] = "IA"
+    return clean_words(words)
+
+
+def parse_json_obj(txt):
+    m = re.search(r"\{.*\}", txt or "", re.S)
+    if not m:
+        return {}
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        try:
+            return json.loads(re.sub(r",\s*([\]}])", r"\1", m.group(0)))
+        except Exception:
+            return {}
+
+
+def clip_prompt(mn, mx):
+    return (
+        "Tu es un monteur expert en clips viraux pour TikTok, Reels et YouTube Shorts. On te donne un extrait "
+        "horodaté de la transcription d'une longue vidéo (podcast, conférence, interview, prêche, débat…). "
+        "Chaque ligne commence par son numéro, puis l'heure où elle est dite.\n\n"
+        "Ta mission : repérer les passages qui feraient d'excellents clips courts, capables de devenir viraux.\n"
+        "Un bon clip :\n"
+        "- commence par une phrase forte qui accroche dès les 3 premières secondes (question, affirmation choc, "
+        "début d'histoire, vérité qui dérange), jamais par « euh », « donc », « et », une fin de phrase ou une salutation ;\n"
+        "- parle d'un vrai sujet de fond : une idée forte, une leçon, une histoire, un conseil concret, une révélation, "
+        "une émotion forte, une punchline, un désaccord ;\n"
+        "- se comprend tout seul, sans avoir vu le reste de la vidéo ;\n"
+        "- se termine sur une conclusion, une chute ou une phrase marquante, jamais au milieu d'une idée ;\n"
+        f"- dure entre {mn} et {mx} secondes (calcule avec les heures des lignes).\n"
+        "À éviter absolument : introductions, présentation des invités, remerciements, appels à s'abonner, "
+        "publicités et partenariats, logistique, passages flous, bavardage sans fond.\n\n"
+        "Note chaque clip de 0 à 100 selon son potentiel viral (90 et plus : exceptionnel, 75-89 : très bon, "
+        "60-74 : correct). Ne propose rien en dessous de 60. Mieux vaut 0 ou 1 clip excellent que 4 moyens. "
+        "Maximum 4 clips dans cet extrait, qui ne se chevauchent pas.\n\n"
+        "Réponds UNIQUEMENT avec un objet JSON, sans aucun texte autour, au format :\n"
+        '{"clips":[{"debut":12,"fin":19,"score":87,"titre":"...","accroche":"...","pourquoi":"...","type":"..."}]}\n'
+        "- debut : numéro de la ligne où le clip commence ; fin : numéro de la dernière ligne incluse ;\n"
+        "- titre : titre court et percutant en français pour publier le clip (70 caractères maximum, sans hashtag) ;\n"
+        "- accroche : la première phrase du clip, telle qu'elle est dite ;\n"
+        "- pourquoi : en une phrase en français, pourquoi ce passage peut devenir viral ;\n"
+        "- type : un seul mot parmi histoire, conseil, révélation, émotion, punchline, débat, humour, motivation, foi.\n"
+        'S\'il n\'y a aucun bon passage, réponds {"clips":[]}.')
+
+
+def fit_moment(lines, ld, lf, mn, mx):
+    """Ajuste début/fin sur les lignes pour respecter la durée voulue."""
+    while lf > ld and lines[lf]["e"] - lines[ld]["s"] > mx + 5:
+        lf -= 1
+    while (lines[lf]["e"] - lines[ld]["s"] < mn and lf + 1 < len(lines)
+           and lines[lf + 1]["e"] - lines[ld]["s"] <= mx + 5 and lines[lf + 1]["s"] - lines[lf]["e"] < 2.5):
+        lf += 1
+    return ld, lf, max(0.0, lines[ld]["s"] - 0.15), lines[lf]["e"] + 0.35
+
+
+def find_moments(job, lines):
+    mn, mx = CLIP_LENGTHS[job["length"]]
+    total = lines[-1]["e"]
+    windows, ws = [], 0.0
+    while ws < total:
+        idx = [i for i, l in enumerate(lines) if ws <= l["s"] < ws + WINDOW]
+        if idx:
+            windows.append(idx)
+        if ws + WINDOW >= total:
+            break
+        ws += STEP
+    system = clip_prompt(mn, mx)
+    found = []
+    job["parts"] = len(windows)
+    for k, idx in enumerate(windows, 1):
+        job["part"], job["msg"] = k - 1, f"Analyse IA · partie {k}/{len(windows)}"
+        body = "\n".join(f"{i} [{fmt_ts(lines[i]['s'])}] {lines[i]['text']}" for i in idx)
+        try:
+            out = groq_chat([{"role": "system", "content": system},
+                             {"role": "user", "content": f"Vidéo : {job['title']}\n\n{body}"}], max_tokens=4000)
+        except RuntimeError as e:
+            if "invalide" in str(e):
+                raise
+            print(f"[clip {job['id']}] analyse {k} ratée : {e}", flush=True)
+            continue
+        for c in (parse_json_obj(out).get("clips") or [])[:6]:
+            try:
+                ld, lf, score = int(c.get("debut")), int(c.get("fin")), int(float(c.get("score") or 0))
+            except (TypeError, ValueError):
+                continue
+            if not (idx[0] <= ld <= idx[-1]) or score < 55:
+                continue
+            lf = max(ld, min(lf, len(lines) - 1))
+            ld, lf, s, e = fit_moment(lines, ld, lf, mn, mx)
+            if e - s < max(8, mn * 0.5):
+                continue
+            found.append({"s": round(s, 2), "e": round(e, 2), "score": min(score, 100),
+                          "titre": str(c.get("titre") or "").strip()[:90],
+                          "accroche": str(c.get("accroche") or lines[ld]["text"]).strip()[:220],
+                          "pourquoi": str(c.get("pourquoi") or "").strip()[:260],
+                          "type": str(c.get("type") or "").strip().lower()[:20]})
+        job["part"] = k
+    found.sort(key=lambda m: m["score"], reverse=True)
+    kept = []
+    for m in found:  # pas de doublons entre tranches qui se chevauchent
+        if all(min(m["e"], o["e"]) - max(m["s"], o["s"]) < 0.3 * min(m["e"] - m["s"], o["e"] - o["s"]) for o in kept):
+            kept.append(m)
+        if len(kept) >= job["count"]:
+            break
+    return kept
+
+
+def ass_text(t):
+    return t.replace("\\", "").replace("{", "(").replace("}", ")")
+
+
+def clip_ass(words, m, job, path):
+    """Sous-titres animés mot à mot + titre en haut (format ASS)."""
+    blur = job["style"] == "blur"
+    sub_mv, title_mv = (300, 250) if blur else (330, 170)
+    head = (f"[Script Info]\nScriptType: v4.00+\nPlayResX: {CLIP_W}\nPlayResY: {CLIP_H}\nWrapStyle: 0\n"
+            "ScaledBorderAndShadow: yes\n\n[V4+ Styles]\n"
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
+            "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
+            "MarginR, MarginV, Encoding\n"
+            f"Style: Sub,Anton,68,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,1,0,1,5,2,2,40,40,{sub_mv},1\n"
+            f"Style: Title,Anton,58,&H0000E5FF,&H0000E5FF,&H00000000,&H78000000,0,0,0,0,100,100,0.5,0,1,4,2,8,50,50,{title_mv},1\n\n"
+            "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+
+    def ts(t):
+        t = max(0.0, t)
+        return f"{int(t // 3600)}:{int(t % 3600 // 60):02d}:{t % 60:05.2f}"
+
+    dur = m["e"] - m["s"]
+    out = []
+    if job["show_title"] and m["titre"]:
+        out.append(f"Dialogue: 1,{ts(0)},{ts(dur)},Title,,0,0,0,,{{\\fad(250,0)}}{ass_text(m['titre'].upper())}")
+    if job["subs"]:
+        ws = [[a - m["s"], b - m["s"], w] for a, b, w in words if m["s"] - 0.05 <= a < m["e"]]
+        chunks, cur = [], []
+        for w in ws:
+            if cur and (len(cur) >= 3 or w[0] - cur[-1][1] > 0.5 or len(" ".join(x[2] for x in cur + [w])) > 18):
+                chunks.append(cur)
+                cur = []
+            cur.append(w)
+            if re.search(r"[.!?,;:…]$", w[2]):
+                chunks.append(cur)
+                cur = []
+        if cur:
+            chunks.append(cur)
+        for i, c in enumerate(chunks):
+            a = c[0][0]
+            b = min(chunks[i + 1][0][0] if i + 1 < len(chunks) else dur, c[-1][1] + 0.4, dur)
+            if b - a < 0.08:
+                continue
+            txt = re.sub(r"[.,;:]+$", "", " ".join(x[2] for x in c)).upper()
+            out.append(f"Dialogue: 0,{ts(a)},{ts(b)},Sub,,0,0,0,,"
+                       f"{{\\fscx86\\fscy86\\t(0,90,\\fscx100\\fscy100)}}{ass_text(txt)}")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(head + "\n".join(out) + "\n")
+
+
+def clip_sources(job):
+    h = 1080 if job["style"] == "crop" else 720
+    fmt = (f"bv*[height<={h}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<={h}][vcodec^=avc1]+ba/"
+           f"bv*[height<={h}]+ba/b[height<={h}]/b")
+    with yt_dlp.YoutubeDL(ydl_opts(job["site"], format=fmt, skip_download=True)) as y:
+        info = y.extract_info(job["url"], download=False)
+    fs = info.get("requested_formats") or [info]
+    return [(f["url"], f.get("http_headers") or {}) for f in fs if f.get("url")]
+
+
+def render_clip(job, m, path, srcs):
+    d = m["e"] - m["s"]
+    ass = os.path.join(job["dir"], f"c{m['n']:02d}.ass")
+    clip_ass(job["words"], m, job, ass)
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-nostdin"]
+    for u, hd in srcs:
+        if u.startswith("http"):
+            cmd += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+            if hd:
+                cmd += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in hd.items())]
+        cmd += ["-ss", f"{m['s']:.3f}", "-t", f"{d:.3f}", "-i", u]
+    W, H = CLIP_W, CLIP_H
+    if job["style"] == "blur":
+        fc = (f"[0:v]scale={W}:-2,setsar=1,split[a][b];"
+              f"[a]scale=144:256:force_original_aspect_ratio=increase,crop=144:256,boxblur=6:2,"
+              f"scale={W}:{H},eq=brightness=-0.12:saturation=1.2[bg];"
+              f"[bg][b]overlay=(W-w)/2:(H-h)/2,fps=30")
+    else:
+        fc = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps=30"
+    fc += f",ass=filename={ass}:fontsdir={FONTS_DIR},format=yuv420p[v]"
+    audio = "1:a:0" if len(srcs) > 1 else "0:a:0?"
+    cmd += ["-filter_complex", fc, "-map", "[v]", "-map", audio,
+            "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-movflags", "+faststart",
+            "-threads", FF_THREADS, "-t", f"{d:.3f}", path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)
+    if r.returncode != 0 or not os.path.exists(path) or os.path.getsize(path) < 10000:
+        raise RuntimeError((r.stderr or "montage impossible").strip()[-300:])
+
+
+def run_clip_job(job):
+    print(f"[clip {job['id']}] {job['url']} ({job['count']} clips, {job['length']}, {job['style']})", flush=True)
+    tmp = tempfile.mkdtemp(dir=BASE)
+    try:
+        job["phase"], job["msg"] = "listing", "Lecture de la vidéo…"
+        with yt_dlp.YoutubeDL(ydl_opts(job["site"], skip_download=True)) as y:
+            info = y.extract_info(job["url"], download=False)
+        if info.get("entries"):
+            raise RuntimeError("C'est une playlist ou une chaîne : colle le lien d'une seule vidéo.")
+        job["title"] = info.get("title") or "Vidéo"
+        job["duration"] = info.get("duration") or 0
+        job["vid"] = info.get("id") or ""
+        if info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming"):
+            raise RuntimeError("Cette vidéo est un live en cours : attends la fin du direct puis relance.")
+        if job["duration"] and job["duration"] > 4 * 3600:
+            raise RuntimeError("Vidéo trop longue (4 h maximum).")
+        if job["duration"] and job["duration"] < 90:
+            raise RuntimeError("Vidéo trop courte : colle une longue vidéo (au moins quelques minutes).")
+        job["phase"], job["msg"] = "transcribing", "Récupération du texte…"
+        words = clip_transcript(job, info, tmp)
+        if len(words) < 40:
+            raise RuntimeError("Pas assez de paroles dans cette vidéo pour trouver des moments forts.")
+        job["words"] = words
+        lines = build_lines(words)
+        job["phase"] = "analyzing"
+        moments = find_moments(job, lines)
+        if not moments:
+            raise RuntimeError("L'IA n'a trouvé aucun passage assez fort dans cette vidéo. Essaie une autre durée de clip.")
+        for n, m in enumerate(moments, 1):
+            m.update(n=n, status="pending", msg="", size=0, file="")
+        job["moments"] = moments
+        job["phase"] = "rendering"
+        srcs = None
+        for m in moments:
+            if shutil.disk_usage(BASE).free < 300 * 1024 ** 2:
+                m["status"], m["msg"] = "error", "Serveur plein : télécharge les clips prêts puis relance."
+                continue
+            m["status"], m["msg"] = "working", "Montage…"
+            path = os.path.join(job["dir"], f"clip_{m['n']:02d}.mp4")
+            for attempt in range(2):
+                try:
+                    if srcs is None or attempt:
+                        srcs = clip_sources(job)
+                    render_clip(job, m, path, srcs)
+                    safe = safe_name(m["titre"] or job["title"], 50).replace(" ", "_")
+                    m.update(status="done", msg="", size=os.path.getsize(path), file=path,
+                             name=f"Clip_{m['n']:02d}_{safe}.mp4")
+                    break
+                except Exception as e:
+                    msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+                    print(f"[clip {job['id']}] clip {m['n']} essai {attempt + 1} : {msg[:300]}", flush=True)
+                    if is_bot_block(msg):
+                        msg = bot_message()
+                    m["status"], m["msg"] = "error", ("Montage raté : " + msg)[:200]
+        if not any(m["status"] == "done" for m in moments):
+            raise RuntimeError(moments[0]["msg"] or "Aucun clip n'a pu être monté.")
+        job["phase"], job["msg"] = "done", ""
+        print(f"[clip {job['id']}] terminé : {sum(m['status'] == 'done' for m in moments)}/{len(moments)} clips", flush=True)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        print(f"[clip {job['id']}] erreur : {msg[:300]}", flush=True)
+        if job["site"] == "youtube" and is_bot_block(msg):
+            msg = bot_message()
+        if "Unsupported URL" in msg:
+            msg = "Lien non reconnu. Colle le lien d'une vidéo YouTube."
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        job["finished"] = time.time()
+
+
+@app.post("/api/clip")
+def start_clip():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    cleanup()
+    d = request.get_json(force=True) or {}
+    m = re.search(r"https?://\S+", (d.get("url") or "").strip())
+    if not m:
+        return jsonify(error="Colle le lien complet de la vidéo (il commence par https://)."), 400
+    if any(j["platform"] == "clip" and not j.get("finished") for j in JOBS.values()):
+        return jsonify(error="Un clipping est déjà en cours. Attends qu'il se termine."), 409
+    url = m.group(0)
+    try:
+        count = max(1, min(int(d.get("count") or 5), 15))
+    except ValueError:
+        count = 5
+    jid = uuid.uuid4().hex[:12]
+    job = {"id": jid, "platform": "clip", "url": url, "source": url,
+           "site": "youtube" if re.search(r"youtu\.?be", url) else "other",
+           "count": count, "length": d.get("length") if d.get("length") in CLIP_LENGTHS else "moyen",
+           "style": "crop" if d.get("style") == "crop" else "blur",
+           "subs": d.get("subs", True) is not False, "show_title": d.get("title", True) is not False,
+           "lang": (d.get("lang") or "").strip()[:5], "phase": "queued", "msg": "En attente…", "error": "",
+           "title": "", "duration": 0, "vid": "", "method": "", "part": 0, "parts": 0, "moments": [],
+           "words": [], "items": [], "created": time.time(), "dir": os.path.join(BASE, "c_" + jid)}
+    os.makedirs(job["dir"], exist_ok=True)
+    with LOCK:
+        JOBS[jid] = job
+    threading.Thread(target=run_clip_job, args=(job,), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+@app.get("/api/clip/<jid>")
+def clip_status(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "clip":
+        return jsonify(error="Clipping introuvable (le serveur a peut-être redémarré). Relance-le."), 404
+    keys = ("n", "s", "e", "score", "titre", "accroche", "pourquoi", "type", "status", "msg", "size")
+    return jsonify(phase=j["phase"], msg=j["msg"], error=j["error"], title=j["title"], duration=j["duration"],
+                   vid=j["vid"], url=j["url"], method=j["method"], part=j["part"], parts=j["parts"],
+                   style=j["style"], moments=[{k: m.get(k) for k in keys} for m in j["moments"]])
+
+
+@app.get("/api/clip/<jid>/v/<int:n>")
+def clip_video(jid, n):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    m = next((x for x in (j or {}).get("moments", []) if x["n"] == n and x["status"] == "done"), None)
+    if not m or not os.path.exists(m["file"]):
+        return "Clip introuvable (le serveur a peut-être redémarré). Relance le clipping.", 404
+    return send_file(m["file"], mimetype="video/mp4", as_attachment=request.args.get("dl") == "1",
+                     download_name=m["name"], max_age=3600, conditional=True)
+
+
+@app.get("/api/clip/<jid>/zip")
+def clip_zip(jid):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    done = [m for m in (j or {}).get("moments", []) if m["status"] == "done" and os.path.exists(m["file"])]
+    if not done:
+        return "Aucun clip prêt (le serveur a peut-être redémarré).", 404
+    zpath = os.path.join(j["dir"], "clips.zip")
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:
+        for m in done:
+            z.write(m["file"], m["name"])
+        z.writestr("titres.txt", "\n\n".join(
+            f"Clip {m['n']:02d} · {fmt_ts(m['s'])} → {fmt_ts(m['e'])} · note {m['score']}/100\n{m['titre']}\n{m['pourquoi']}"
+            for m in done))
+    safe = safe_name(j["title"], 40).replace(" ", "_")
+    return send_file(zpath, as_attachment=True, download_name=f"Clips_{safe}.zip", mimetype="application/zip")
 
 
 @app.get("/favicon.ico")

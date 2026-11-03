@@ -135,6 +135,29 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 .fdrop.has{border-style:solid;border-color:var(--ink);background:var(--card)}
 .ftext{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;max-height:460px;overflow:auto;font-size:16px;line-height:1.75;max-width:100%}
 .ftext p{margin:0 0 14px;max-width:72ch}
+.check{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:700;color:var(--ink);letter-spacing:0;margin:0;cursor:pointer}
+.check input{width:20px;height:20px;flex:none;accent-color:#111;padding:0}
+.grid.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.checks{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px}
+.clips{display:grid;gap:12px;margin-top:8px}
+.cl{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;min-width:0}
+.cl.top{border:2px solid var(--ink)}
+.cvid{width:150px;aspect-ratio:9/16;border-radius:12px;overflow:hidden;background:#111;display:grid;place-items:center;color:#aaa;font-weight:800;font-size:13px;text-align:center;padding:0}
+.cvid video{width:100%;height:100%;object-fit:cover;display:block}
+.cvid.run{background:linear-gradient(160deg,#111 40%,#3a0c22);color:#ff7fb0;animation:blink 1.4s infinite}
+.cbody{min-width:0;display:flex;flex-direction:column;gap:6px}
+.chead{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.score{font:800 15px var(--display);padding:4px 10px;border-radius:99px;background:var(--soft);font-variant-numeric:tabular-nums}
+.score.s1{background:var(--lime);color:#111}.score.s2{background:var(--violet-bg);color:var(--violet)}
+.ctime{font-size:13px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.ctitle{font:800 19px/1.2 var(--display);letter-spacing:-.01em;margin:0;overflow-wrap:anywhere}
+.chook{margin:0;font-style:italic;overflow-wrap:anywhere}
+.cwhy{margin:0;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.cacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:4px}
+.cacts a,.cacts button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 12px;border-radius:99px;font:700 13px var(--body);cursor:pointer;text-decoration:none}
+.cacts .main{background:var(--lime);border-color:var(--lime);color:#111}
+.cacts [aria-disabled="true"]{opacity:.45;pointer-events:none}
+@media (max-width:560px){.cl{grid-template-columns:104px minmax(0,1fr);gap:12px;padding:12px}.cvid{width:104px}.ctitle{font-size:16px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -168,11 +191,52 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 
   <nav class="modes" role="tablist" aria-label="Mode">
     <button role="tab" id="tabAcc" class="on" aria-selected="true" aria-controls="modeAcc">Comptes TikTok · YouTube</button>
+    <button role="tab" id="tabCl" aria-selected="false" aria-controls="modeCl">✂ Clipping</button>
     <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile">Fichier audio · vidéo</button>
     <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl">Télécharger TikTok</button>
     <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr">Traduire</button>
     <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd">Photos · posts</button>
   </nav>
+
+  <div id="modeCl" role="tabpanel" hidden>
+    <h1>Colle une longue vidéo.<br>Récupère <span>les moments viraux</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <label for="cUrl">Lien de la vidéo YouTube</label>
+        <input id="cUrl" class="bigin" inputmode="url" placeholder="https://www.youtube.com/watch?v=… ou https://youtu.be/…" autocomplete="off">
+        <div class="grid g2">
+          <div><label for="cCount">Nombre de clips</label>
+            <select id="cCount"><option>3</option><option selected>5</option><option>8</option><option>10</option><option>15</option></select></div>
+          <div><label for="cLen">Durée des clips</label>
+            <select id="cLen"><option value="court">15 à 35 s</option><option value="moyen" selected>30 à 60 s</option><option value="long">55 à 90 s</option></select></div>
+          <div><label for="cStyle">Format vertical</label>
+            <select id="cStyle"><option value="blur">Fond flou</option><option value="crop">Plein écran</option></select></div>
+          <div><label for="cLang">Langue parlée</label>
+            <select id="cLang"><option value="">Auto</option><option value="fr" selected>Français</option><option value="en">Anglais</option><option value="ar">Arabe</option><option value="es">Espagnol</option><option value="pt">Portugais</option></select></div>
+        </div>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="cSubs" checked>Sous-titres animés</label>
+          <label class="check"><input type="checkbox" id="cTitle" checked>Titre en haut du clip</label>
+        </div>
+        <button class="go" id="cGo">Trouver les moments viraux →</button>
+        <p class="hint">L'IA lit toute la vidéo, garde les passages qui accrochent et qui parlent d'un vrai sujet, puis te les monte en 9:16 pour TikTok, Reels et Shorts. « Fond flou » garde toute l'image (idéal pour les podcasts à 2) ; « Plein écran » recadre au centre.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Clips prêts</span>
+        <div class="big"><span id="cOk">0</span><small id="cTot">/0</small></div>
+        <div class="bar" id="cBar"><i id="cFill"></i></div>
+        <div class="state" id="cState"><span class="empty">Colle un lien pour lancer le clipping.</span></div>
+        <div class="acts">
+          <a class="btn dl" id="cZip" href="#" aria-disabled="true">Télécharger tous les clips</a>
+          <button class="btn" id="cCopy" aria-disabled="true">Copier les titres</button>
+        </div>
+      </aside>
+    </div>
+    <section class="list" id="cBox" hidden>
+      <h2 id="cHead">Moments forts</h2>
+      <div class="clips" id="cList"></div>
+    </section>
+  </div>
 
   <div id="modeMd" role="tabpanel" hidden>
     <h1>Colle un lien de post.<br>Récupère <span>toutes les photos</span>.</h1>
@@ -410,7 +474,7 @@ function copyText(t,btn,label){
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
 }
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd']};
+const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -418,6 +482,66 @@ function setMode(m){
 }
 for(const [k,[t]] of Object.entries(MODES))$(t).onclick=()=>setMode(k);
 try{setMode(localStorage.getItem('mode')||'acc')}catch(e){}
+
+/* ---------- clipping ---------- */
+let cTimer=null,cBusy=false,cSig='',cData=null,cJob='';
+function ts(t){t=Math.max(0,Math.floor(t));const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return (h?h+':'+String(m).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(s).padStart(2,'0')}
+try{const p=JSON.parse(localStorage.getItem('clipPrefs')||'{}');['cCount','cLen','cStyle','cLang'].forEach(k=>{if(p[k]!=null)$('#'+k).value=p[k]});['cSubs','cTitle'].forEach(k=>{if(p[k]!=null)$('#'+k).checked=p[k]})}catch(e){}
+function cSetBusy(on){cBusy=on;$('#cGo').classList.toggle('busy',on);$('#cGo').textContent=on?'Kopi cherche les pépites…':'Trouver les moments viraux →';$('#cBar').classList.toggle('live',on)}
+function cErr(m){$('#cState').innerHTML=`<div class="err">${esc(m)}</div>`;cSetBusy(false)}
+$('#cUrl').addEventListener('keydown',e=>{if(e.key==='Enter')$('#cGo').click()});
+$('#cGo').onclick=async()=>{
+  if(cBusy)return;
+  const url=$('#cUrl').value.trim();if(!url){$('#cUrl').focus();return}
+  const p={cCount:$('#cCount').value,cLen:$('#cLen').value,cStyle:$('#cStyle').value,cLang:$('#cLang').value,cSubs:$('#cSubs').checked,cTitle:$('#cTitle').checked};
+  try{localStorage.setItem('clipPrefs',JSON.stringify(p))}catch(e){}
+  cSetBusy(true);['#cZip','#cCopy'].forEach(s=>$(s).setAttribute('aria-disabled','true'));$('#cBox').hidden=true;$('#cOk').textContent='0';$('#cTot').textContent='/0';$('#cFill').style.width='3%';cSig='';
+  try{const r=await fetch('/api/clip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,count:+p.cCount,length:p.cLen,style:p.cStyle,lang:p.cLang,subs:p.cSubs,title:p.cTitle})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('clipJob',d.job_id)}catch(e){}cWatch(d.job_id)}
+  catch(e){cErr(e.message)}
+};
+function cCard(id,d,m,rank){
+  const cls=m.score>=85?'s1':m.score>=70?'s2':'';
+  const yt=d.vid?`https://www.youtube.com/watch?v=${encodeURIComponent(d.vid)}&t=${Math.floor(m.s)}s`:d.url;
+  const v=m.status==='done'?`<div class="cvid"><video src="/api/clip/${id}/v/${m.n}" controls playsinline preload="metadata"></video></div>`
+    :m.status==='working'?'<div class="cvid run">Montage<br>en cours…</div>'
+    :m.status==='error'?'<div class="cvid">Échec</div>':'<div class="cvid">En attente</div>';
+  return `<article class="cl${rank===0?' top':''}">${v}<div class="cbody">
+    <div class="chead"><span class="score ${cls}">${m.score}/100</span>${m.type?`<span class="chip c-wait">${esc(m.type)}</span>`:''}<span class="ctime">${ts(m.s)} → ${ts(m.e)} · ${Math.round(m.e-m.s)} s</span></div>
+    <h3 class="ctitle">${esc(m.titre)||'Moment fort '+m.n}</h3>
+    <p class="chook">« ${esc(m.accroche)} »</p>
+    <p class="cwhy">${m.status==='error'?`<span style="color:var(--err)">${esc(m.msg)}</span>`:esc(m.pourquoi)}</p>
+    <div class="cacts"><a class="main" href="/api/clip/${id}/v/${m.n}?dl=1" aria-disabled="${m.status!=='done'}">Télécharger le clip${m.size?' · '+mo(m.size):''}</a>
+      <a href="${esc(yt)}" target="_blank" rel="noopener">Voir sur YouTube</a>
+      <button type="button" data-copy="${m.n}">Copier le titre</button></div></div></article>`;
+}
+function cWatch(id){
+  clearInterval(cTimer);cSetBusy(true);cJob=id;
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/clip/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(cTimer);cSetBusy(false);$('#cFill').style.width='0';$('#cState').innerHTML=(e&&e.error)?`<div class="err">${esc(e.error)}</div>`:'<span class="empty">Colle un lien pour lancer le clipping.</span>';try{localStorage.removeItem('clipJob')}catch(_){}return}
+    cData=d;const ms=d.moments,ok=ms.filter(m=>m.status==='done').length,fin=ms.filter(m=>['done','error'].includes(m.status)).length;
+    $('#cOk').textContent=ok;$('#cTot').textContent='/'+(ms.length||0);
+    const pr={queued:2,listing:5,transcribing:12,analyzing:20+(d.parts?40*d.part/d.parts:0),rendering:60+(ms.length?40*fin/ms.length:0),done:100,error:0}[d.phase]||0;
+    $('#cFill').style.width=pr+'%';
+    if(ms.length){$('#cBox').hidden=false;$('#cHead').textContent=`${ms.length} moments forts · ${d.title}`;
+      const sig=ms.map(m=>m.status).join();if(sig!==cSig){cSig=sig;$('#cList').innerHTML=ms.map((m,i)=>cCard(id,d,m,i)).join('')}}
+    if(ok){$('#cZip').href='/api/clip/'+id+'/zip';$('#cZip').setAttribute('aria-disabled','false')}
+    if(ms.length)$('#cCopy').setAttribute('aria-disabled','false');
+    const dur=d.duration?` · vidéo de ${fmtDur(d.duration)}`:'';
+    if(!['done','error'].includes(d.phase)){
+      const lbl={queued:'En attente…',listing:'Lecture de la vidéo…',transcribing:(d.msg||'Récupération du texte…')+dur,
+        analyzing:(d.msg||'Analyse IA…')+dur,rendering:`Montage des clips · ${fin}/${ms.length} · environ 1 à 3 min par clip`}[d.phase];
+      $('#cState').textContent=lbl||d.msg;return}
+    clearInterval(cTimer);cSetBusy(false);
+    if(d.phase==='error'){cErr(d.error);if(/cookies/i.test(d.error))fetch('/api/cookies').then(r=>r.json()).then(c=>{ytState(c.status);ytOpen(true)}).catch(()=>{});return}
+    $('#cState').textContent=`Terminé · ${ok} clip${ok>1?'s':''} prêt${ok>1?'s':''}`+(d.method?` (texte : ${d.method})`:'')+'. Les clips restent disponibles 3 heures : télécharge-les.';
+  };
+  tick();cTimer=setInterval(tick,2500);
+}
+$('#cList').onclick=e=>{const b=e.target.closest('[data-copy]');if(!b||!cData)return;const m=cData.moments.find(x=>x.n===+b.dataset.copy);if(m)copyText(m.titre,b,'Copier le titre')};
+$('#cCopy').onclick=()=>{if(!cData)return;copyText(cData.moments.map(m=>`Clip ${m.n} · ${ts(m.s)} → ${ts(m.e)} · ${m.score}/100\n${m.titre}`).join('\n\n'),$('#cCopy'),'Copier les titres')};
+try{const j=localStorage.getItem('clipJob');if(j)cWatch(j)}catch(e){}
 
 /* ---------- photos / médias d'un post ---------- */
 const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);

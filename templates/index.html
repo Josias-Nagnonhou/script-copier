@@ -348,7 +348,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <section id="aReport" class="report" hidden></section>
     <section id="ebPanel" class="tile ebpanel" hidden>
       <div class="ythead"><div><span class="eyebrow">Créateur d'ebook</span><h2>Créer l'ebook</h2></div><button class="icon" id="ebClose" aria-label="Fermer">✕</button></div>
-      <p class="ytlead">L'IA écrit le livre en entier à partir de ce qu'elle a appris sur ton audience : plan, chapitres, exemples concrets, exercices, encadrés, bonus pratique et page « Pour aller plus loin » vers tes autres produits.</p>
+      <p class="ytlead">L'IA écrit le livre en entier à partir de ce qu'elle a appris sur ton audience, puis choisit pour lui un design unique selon le sujet : couleurs, polices, couverture et mise en page (Moderne, Impact, Sacré, Luxe, Doux ou Éditorial).</p>
       <div class="ebgrid">
         <div class="ebcol">
           <label for="ebTitle">Titre ou sujet du livre</label>
@@ -907,7 +907,7 @@ function ebWatch(id){
     $('#ebProg').hidden=true;$('#ebDone').hidden=false;
     $('#ebCover').src='/api/job/'+id+'/ebook/cover';
     $('#ebDoneTitle').textContent=info.title||'';
-    $('#ebDoneMeta').textContent=`${info.pages||'?'} pages · ${(info.toc||[]).length} chapitres`+(info.images?(info.images_ok?` · ${info.images_ok} illustrations IA`:' · visuels graphiques (service d\'images indisponible)'):'');
+    $('#ebDoneMeta').textContent=`${info.pages||'?'} pages · ${(info.toc||[]).length} chapitres`+(info.univers?` · univers ${info.univers}`:'')+(info.images?(info.images_ok?` · ${info.images_ok} illustrations IA`:' · visuels graphiques (service d\'images indisponible)'):'');
     $('#ebToc').innerHTML=(info.toc||[]).map(t=>`<li>${esc(t)}</li>`).join('');
     $('#ebPdf').href='/api/job/'+id+'/ebook/pdf';$('#ebDocx').href='/api/job/'+id+'/ebook/docx';
   };

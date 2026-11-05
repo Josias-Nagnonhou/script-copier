@@ -1552,34 +1552,38 @@ def run_ebook_job(job, ctx):
         bonus = EB.gen_section(chat, plan, ctx, "bonus", w_bonus); tick("Bonus écrit")
         job["step"] = "Rédaction de la conclusion…"
         concl = EB.gen_section(chat, plan, ctx, "conclusion", w_concl); tick("Conclusion écrite")
-        pal = EB.PALETTES.get(plan.get("palette"), EB.PALETTES["ocre"])
+        uni, pal = EB.resolve_design(plan.get("design"))
+        job["univers"] = EB.STYLES[uni]["label"]
         seed = random.randint(1, 10 ** 6)
         cover = os.path.join(d, "cover.jpg")
+        cw, chh = EB.cover_size(uni)
         imgs_ok = 0
         if job["images"]:
             job["step"] = "Illustration de la couverture…"
-            if EB.fetch_image(plan.get("cover_prompt") or ctx["title"], 896, 1280, seed, cover, log=print):
+            if EB.fetch_image(plan.get("cover_prompt") or ctx["title"], cw, chh, seed, cover, log=print, uni=uni):
                 imgs_ok += 1
             else:
-                EB.make_art(pal, cover, 900, 1280, seed)
+                EB.make_art(pal, cover, cw, chh, seed)
             tick("Couverture prête")
             for k, c in enumerate(chs):
                 job["step"] = f"Illustration du chapitre {k + 1}/{len(chs)}…"
                 pth = os.path.join(d, f"ch{k + 1}.jpg")
-                if EB.fetch_image(c.get("image_prompt") or c["titre"], 1280, 720, seed + k + 1, pth, log=print):
+                if EB.fetch_image(c.get("image_prompt") or c["titre"], 1280, 896 if uni in ("sacre", "luxe") else 720,
+                                  seed + k + 1, pth, log=print, uni=uni):
                     imgs_ok += 1
                 else:
-                    EB.make_art(pal, pth, 1280, 720, seed + k + 1)
+                    EB.make_art(pal, pth, 1280, 896 if uni in ("sacre", "luxe") else 720, seed + k + 1)
                 c["img"] = pth
                 tick(f"Illustration {k + 1} prête")
         else:
-            EB.make_art(pal, cover, 900, 1280, seed)
+            EB.make_art(pal, cover, cw, chh, seed)
         job["images_ok"] = imgs_ok
         job["step"], job["pct"] = "Mise en page du PDF…", 94
         others = [o for o in ctx.get("others") or [] if o.get("nom") and o.get("nom") != ctx.get("title")]
         book = {"titre": plan.get("titre") or ctx["title"], "sous_titre": plan.get("sous_titre", ""),
                 "pour_qui": plan.get("pour_qui", ""), "benefices": plan.get("ce_que_tu_vas_obtenir") or [],
-                "avertissement": plan.get("avertissement", ""), "palette": plan.get("palette"),
+                "avertissement": plan.get("avertissement", ""), "univers": uni, "colors": pal,
+                "etiquette": (plan.get("design") or {}).get("etiquette") or "Guide pratique",
                 "auteur": ctx.get("author") or "", "boutique": ctx.get("shop") or "", "cover_img": cover,
                 "intro": intro, "chapitres": chs, "bonus_titre": (plan.get("bonus") or {}).get("titre"),
                 "bonus_texte": bonus, "conclusion": concl, "autres_produits": others}
@@ -1656,7 +1660,7 @@ def job_ebook(jid):
     if not j or j.get("phase") != "done":
         return jsonify(error="Ebook introuvable"), 404
     return jsonify(title=j.get("book_title"), toc=j.get("toc", []), pages=j.get("page_count", 0),
-                   images_ok=j.get("images_ok", 0), images=j.get("images"))
+                   images_ok=j.get("images_ok", 0), images=j.get("images"), univers=j.get("univers", ""))
 
 
 @app.get("/api/job/<jid>/ebook/<kind>")

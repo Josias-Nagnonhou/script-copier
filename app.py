@@ -1,6 +1,6 @@
 """Kopi — récupère la transcription de plusieurs vidéos TikTok / YouTube
 et les rassemble dans un document Word (Script 1, Script 2, ...)."""
-import os, re, zipfile, json, time, uuid, glob, shutil, threading, tempfile, subprocess, datetime
+import os, re, random, zipfile, json, time, uuid, glob, shutil, threading, tempfile, subprocess, datetime
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -1508,6 +1508,168 @@ def start_audit():
         JOBS[job["id"]] = job
     threading.Thread(target=run_audit_job, args=(job,), daemon=True).start()
     return jsonify(job_id=job["id"])
+
+
+# ------------------------------------------------ créateur d'ebook
+import ebook as EB
+
+
+def run_ebook_job(job, ctx):
+    print(f"[ebook {job['id']}] « {ctx['title']} » · {job['pages']} pages · images={job['images']}", flush=True)
+    d = os.path.join(BASE, "e_" + job["id"])
+    os.makedirs(d, exist_ok=True)
+    job["dir"] = d
+    chat = lambda m, **k: groq_chat(m, tag="ebook", **k)
+    try:
+        job["phase"] = "transcribing"
+        job["step"], job["pct"] = "Conception du plan du livre…", 4
+        raw, n_ch = EB.gen_plan(chat, ctx, job["pages"])
+        plan = parse_json_loose(raw)
+        chs = [c for c in (plan.get("chapitres") or []) if c.get("titre")][:12]
+        if len(chs) < 3:
+            raise RuntimeError("Le plan proposé par l'IA est incomplet. Relance la création.")
+        plan["chapitres"] = chs
+        job["toc"] = [c["titre"] for c in chs]
+        job["book_title"] = plan.get("titre") or ctx["title"]
+        total = job["pages"] * 230
+        w_intro, w_bonus, w_concl = 380, max(300, min(700, total // 12)), 300
+        w_ch = max(500, (total - w_intro - w_bonus - w_concl) // len(chs))
+        steps = len(chs) + 3 + (len(chs) + 1 if job["images"] else 0)
+        done = [0]
+
+        def tick(label):
+            done[0] += 1
+            job["step"], job["pct"] = label, 6 + int(done[0] / steps * 86)
+        job["step"] = "Rédaction de l'introduction…"
+        intro = EB.gen_section(chat, plan, ctx, "intro", w_intro); tick("Introduction écrite")
+        prev = ""
+        for k, c in enumerate(chs):
+            job["step"] = f"Rédaction du chapitre {k + 1}/{len(chs)} · {c['titre'][:60]}"
+            c["texte"] = EB.gen_section(chat, plan, ctx, "chapter", w_ch, idx=k, prev=prev)
+            prev = c["titre"]
+            tick(f"Chapitre {k + 1} écrit")
+        job["step"] = "Rédaction du bonus…"
+        bonus = EB.gen_section(chat, plan, ctx, "bonus", w_bonus); tick("Bonus écrit")
+        job["step"] = "Rédaction de la conclusion…"
+        concl = EB.gen_section(chat, plan, ctx, "conclusion", w_concl); tick("Conclusion écrite")
+        pal = EB.PALETTES.get(plan.get("palette"), EB.PALETTES["ocre"])
+        seed = random.randint(1, 10 ** 6)
+        cover = os.path.join(d, "cover.jpg")
+        imgs_ok = 0
+        if job["images"]:
+            job["step"] = "Illustration de la couverture…"
+            if EB.fetch_image(plan.get("cover_prompt") or ctx["title"], 896, 1280, seed, cover, log=print):
+                imgs_ok += 1
+            else:
+                EB.make_art(pal, cover, 900, 1280, seed)
+            tick("Couverture prête")
+            for k, c in enumerate(chs):
+                job["step"] = f"Illustration du chapitre {k + 1}/{len(chs)}…"
+                pth = os.path.join(d, f"ch{k + 1}.jpg")
+                if EB.fetch_image(c.get("image_prompt") or c["titre"], 1280, 720, seed + k + 1, pth, log=print):
+                    imgs_ok += 1
+                else:
+                    EB.make_art(pal, pth, 1280, 720, seed + k + 1)
+                c["img"] = pth
+                tick(f"Illustration {k + 1} prête")
+        else:
+            EB.make_art(pal, cover, 900, 1280, seed)
+        job["images_ok"] = imgs_ok
+        job["step"], job["pct"] = "Mise en page du PDF…", 94
+        others = [o for o in ctx.get("others") or [] if o.get("nom") and o.get("nom") != ctx.get("title")]
+        book = {"titre": plan.get("titre") or ctx["title"], "sous_titre": plan.get("sous_titre", ""),
+                "pour_qui": plan.get("pour_qui", ""), "benefices": plan.get("ce_que_tu_vas_obtenir") or [],
+                "avertissement": plan.get("avertissement", ""), "palette": plan.get("palette"),
+                "auteur": ctx.get("author") or "", "boutique": ctx.get("shop") or "", "cover_img": cover,
+                "intro": intro, "chapitres": chs, "bonus_titre": (plan.get("bonus") or {}).get("titre"),
+                "bonus_texte": bonus, "conclusion": concl, "autres_produits": others}
+        safe = re.sub(r"[^\w-]+", "_", book["titre"])[:50].strip("_") or "ebook"
+        job["pdf"] = os.path.join(d, safe + ".pdf")
+        job["docx"] = os.path.join(d, safe + ".docx")
+        job["safe"] = safe
+        EB.build_pdf(book, job["pdf"])
+        EB.build_docx(book, job["docx"])
+        job["cover"] = cover
+        try:  # aperçu = vraie première page du PDF (avec le titre)
+            import pypdfium2 as pdfium
+            pdf = pdfium.PdfDocument(job["pdf"])
+            prev = os.path.join(d, "preview.jpg")
+            pdf[0].render(scale=1.1).to_pil().convert("RGB").save(prev, "JPEG", quality=85)
+            job["cover"] = prev
+            pdf.close()
+        except Exception as e:
+            print(f"[ebook {job['id']}] aperçu impossible : {e}", flush=True)
+        try:
+            from pypdf import PdfReader
+            job["page_count"] = len(PdfReader(job["pdf"]).pages)
+        except Exception:
+            job["page_count"] = 0
+        job["phase"], job["pct"], job["step"] = "done", 100, "Ebook prêt"
+        print(f"[ebook {job['id']}] terminé ({GOOD_MODEL['name']}) : {job.get('page_count')} pages, "
+              f"{imgs_ok} illustrations IA, {os.path.getsize(job['pdf']) // 1024} Ko", flush=True)
+    except Exception as e:
+        msg = str(e)
+        print(f"[ebook {job['id']}] erreur : {msg[:300]}", flush=True)
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        job["finished"] = time.time()
+
+
+@app.post("/api/ebook")
+def start_ebook():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not GROQ_KEY:
+        return jsonify(error="La clé Groq n'est pas configurée : la rédaction est impossible."), 400
+    cleanup()
+    d = request.get_json(force=True) or {}
+    title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()[:120]
+    if not title:
+        return jsonify(error="Donne un titre ou un sujet à ton ebook."), 400
+    if any(j["platform"] == "ebook" and j["phase"] in ("queued", "transcribing") for j in JOBS.values()):
+        return jsonify(error="Un ebook est déjà en cours de création. Attends qu'il se termine."), 409
+    try:
+        pages = max(10, min(int(d.get("pages") or 30), 100))
+    except ValueError:
+        pages = 30
+    keep = lambda v, n: v[:n] if isinstance(v, str) else ""
+    ctx = {"title": title, "product": d.get("product") or {}, "audience": d.get("audience") or {},
+           "niche": keep(d.get("niche"), 200), "douleurs": [keep(x, 200) for x in (d.get("douleurs") or [])][:6],
+           "desirs": [keep(x, 200) for x in (d.get("desirs") or [])][:6], "brief": keep(d.get("brief"), 800),
+           "author": keep(d.get("author"), 60), "shop": keep(d.get("shop"), 200),
+           "others": [{"nom": keep(o.get("nom"), 120), "promesse": keep(o.get("promesse"), 200)}
+                      for o in (d.get("others") or []) if isinstance(o, dict)][:6]}
+    job = {"id": uuid.uuid4().hex[:12], "platform": "ebook", "source": title, "url": "", "limit": 0, "sort": "",
+           "lang": "", "phase": "queued", "items": [], "source_name": title, "error": "", "created": time.time(),
+           "pages": pages, "images": bool(d.get("images", True)), "step": "En attente…", "pct": 0}
+    with LOCK:
+        JOBS[job["id"]] = job
+    threading.Thread(target=run_ebook_job, args=(job, ctx), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.get("/api/job/<jid>/ebook")
+def job_ebook(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("phase") != "done":
+        return jsonify(error="Ebook introuvable"), 404
+    return jsonify(title=j.get("book_title"), toc=j.get("toc", []), pages=j.get("page_count", 0),
+                   images_ok=j.get("images_ok", 0), images=j.get("images"))
+
+
+@app.get("/api/job/<jid>/ebook/<kind>")
+def job_ebook_file(jid, kind):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    key = {"pdf": "pdf", "docx": "docx", "cover": "cover"}.get(kind)
+    if not j or not key or not j.get(key) or not os.path.exists(j[key]):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance la création.", 404
+    if kind == "cover":
+        return send_file(j[key], mimetype="image/jpeg", max_age=3600)
+    return send_file(j[key], as_attachment=True, download_name=f"{j['safe']}.{kind}")
 
 
 @app.get("/api/job/<jid>/report")

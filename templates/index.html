@@ -179,6 +179,25 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .plan li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:2px 10px}
 .plan li::before{content:counter(s);grid-row:span 2;width:30px;height:30px;border-radius:9px;background:#111;color:var(--lime);display:grid;place-items:center;font:800 14px var(--display)}
 .plan p{margin:0;color:var(--muted);font-size:14px}
+.ebk{margin-top:4px;width:100%;background:#111;color:var(--lime);border-color:#111}
+.ebcta{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;background:var(--card);border:1px dashed var(--line);border-radius:18px;padding:16px 18px}
+.ebcta div{display:grid;gap:2px}.ebcta small{color:var(--muted)}
+.ebpanel{margin-top:16px;scroll-margin-top:16px}
+.ebpanel h2{font:800 24px var(--display);letter-spacing:-.02em;margin:2px 0 0}
+.ebgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px;margin-top:6px}
+.ebcol{min-width:0}
+.opt{font-weight:500;color:var(--muted);letter-spacing:0}
+#ebBrief{width:100%;resize:vertical;padding:12px 14px;border:1px solid var(--line);border-radius:13px;background:var(--soft);color:var(--ink);font:500 14px/1.5 var(--body);min-width:0}
+.ebprog{margin-top:16px}
+.ebstate{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;font-weight:600}
+.ebstate b{font:800 20px var(--display);font-variant-numeric:tabular-nums}
+.ebdone{display:grid;grid-template-columns:minmax(0,200px) minmax(0,1fr);gap:22px;margin-top:18px;align-items:start}
+@media (max-width:560px){.ebdone{grid-template-columns:1fr}.ebdone img{max-width:220px}}
+.ebdone img{width:100%;aspect-ratio:210/297;object-fit:cover;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);background:var(--soft)}
+.ebinfo h3{font:800 24px/1.15 var(--display);letter-spacing:-.02em;margin:4px 0}
+.muted{color:var(--muted);margin:0 0 10px}
+.ebtoc{margin:0 0 14px;padding-left:20px;display:grid;gap:4px;font-weight:600;font-size:14px}
+.ebacts{display:flex;gap:10px;flex-wrap:wrap}.ebacts .btn{flex:1;min-width:170px}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px;margin:-8px 0 26px;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
 .modes::-webkit-scrollbar{display:none}
@@ -327,6 +346,50 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
       </aside>
     </div>
     <section id="aReport" class="report" hidden></section>
+    <section id="ebPanel" class="tile ebpanel" hidden>
+      <div class="ythead"><div><span class="eyebrow">Créateur d'ebook</span><h2>Créer l'ebook</h2></div><button class="icon" id="ebClose" aria-label="Fermer">✕</button></div>
+      <p class="ytlead">L'IA écrit le livre en entier à partir de ce qu'elle a appris sur ton audience : plan, chapitres, exemples concrets, exercices, encadrés, bonus pratique et page « Pour aller plus loin » vers tes autres produits.</p>
+      <div class="ebgrid">
+        <div class="ebcol">
+          <label for="ebTitle">Titre ou sujet du livre</label>
+          <input id="ebTitle" class="bigin" autocomplete="off">
+          <label for="ebBrief" style="margin-top:12px">Consignes pour l'IA <small class="opt">(facultatif)</small></label>
+          <textarea id="ebBrief" rows="3" placeholder="Ex. : insiste sur les prières du matin, ajoute des témoignages, ton très bienveillant…"></textarea>
+          <div class="num">
+            <label for="ebPages">Nombre de pages</label>
+            <div class="numrow">
+              <input id="ebPages" class="numin" type="number" inputmode="numeric" min="10" max="100" step="1" value="30">
+              <div class="chips" id="ebChips"><button type="button" data-v="15">15</button><button type="button" data-v="30" class="on">30</button><button type="button" data-v="50">50</button><button type="button" data-v="80">80</button></div>
+            </div>
+            <p class="numerr" id="ebPagesErr" hidden>Choisis entre 10 et 100 pages.</p>
+          </div>
+        </div>
+        <div class="ebcol">
+          <label for="ebAuthor">Nom de l'auteur ou de la marque</label>
+          <input id="ebAuthor" autocomplete="off" placeholder="Ton nom ou celui de ta chaîne">
+          <label for="ebShop" style="margin-top:12px">Lien de ta boutique <small class="opt">(facultatif)</small></label>
+          <input id="ebShop" inputmode="url" autocomplete="off" placeholder="https://… (affiché en fin de livre)">
+          <label class="acheck"><input type="checkbox" id="ebImg" checked> <span><b>Illustrations par IA</b> · une couverture et une image par chapitre, avec des personnages africains, sans texte. Sinon, visuels graphiques aux couleurs du livre.</span></label>
+        </div>
+      </div>
+      <button class="go" id="ebGo">Créer l'ebook →</button>
+      <div class="ebprog" id="ebProg" hidden>
+        <div class="bar" id="ebBar"><i id="ebFill"></i></div>
+        <div class="ebstate"><b id="ebPct">0 %</b><span id="ebState">Préparation…</span></div>
+        <p class="hint">Compte 3 à 12 minutes selon le nombre de pages. Tu peux fermer la page : la création continue, et tu la retrouves ici.</p>
+      </div>
+      <div class="ebdone" id="ebDone" hidden>
+        <img id="ebCover" alt="Couverture de l'ebook">
+        <div class="ebinfo">
+          <span class="eyebrow">Ebook prêt</span>
+          <h3 id="ebDoneTitle"></h3>
+          <p id="ebDoneMeta" class="muted"></p>
+          <ol id="ebToc" class="ebtoc"></ol>
+          <div class="ebacts"><a class="btn dl" id="ebPdf" href="#">Télécharger le PDF</a><a class="btn" id="ebDocx" href="#">Word modifiable</a></div>
+          <p class="hint">Relis-le avant de le vendre : vérifie les références (versets, chiffres) et ajoute ta touche personnelle dans la version Word.</p>
+        </div>
+      </div>
+    </section>
   </div>
 
   <div id="modeMd" role="tabpanel" hidden>
@@ -720,7 +783,7 @@ let lbX=null;$('#lb').addEventListener('touchstart',e=>{lbX=e.touches[0].clientX
 $('#lb').addEventListener('touchend',e=>{if(lbX===null)return;const dx=e.changedTouches[0].clientX-lbX;if(Math.abs(dx)>50)lbStep(dx<0?1:-1);lbX=null});
 
 /* ---------- monétisation ---------- */
-let aPlat='youtube',aLimit=40,aTimer=null,aBusy=false;
+let aPlat='youtube',aLimit=40,aTimer=null,aBusy=false,aCur=null;
 document.querySelectorAll('#aPlat button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aPlat button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aPlat=b.dataset.p;
   $('#aSource').placeholder=aPlat==='tiktok'?'@nomducompte ou https://www.tiktok.com/@...':'@nomdelachaine ou https://www.youtube.com/@...'});
 document.querySelectorAll('#aChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aLimit=+b.dataset.v});
@@ -743,6 +806,7 @@ function aRender(d){
       ${p.pourquoi_ca_marchera?`<p><span class="k">Pourquoi ça marchera</span>${esc(p.pourquoi_ca_marchera)}</p>`:''}
       ${L(p.contenu).length?`<details><summary>Contenu du produit</summary>${ul(p.contenu)}</details>`:''}
       ${p.premier_pas?`<p class="step1"><span class="k">Cette semaine</span>${esc(p.premier_pas)}</p>`:''}
+      <button type="button" class="btn ebk" data-i="${i}">Créer cet ebook</button>
     </article>`}).join('');
   const kpi=[[num(src.videos),'vidéos analysées'],[st.followers?num(st.followers):'—','abonnés'],[st.moyenne_vues?num(st.moyenne_vues):'—','vues en moyenne'],[(src.scripts||0)+' · '+(src.commentaires||0),'scripts · commentaires lus']];
   $('#aReport').innerHTML=`
@@ -765,7 +829,8 @@ function aRender(d){
       ${sec('Autres sources de revenus',ul(r.autres_revenus))}
       ${sec('Pièges à éviter',ul(r.pieges_a_eviter))}
     </div>`;
-  $('#aReport').hidden=false;
+  $('#aReport').insertAdjacentHTML('beforeend','<div class="ebcta"><div><b>Une autre idée de livre ?</b><small>Crée un ebook sur le sujet de ton choix, adapté à cette audience.</small></div><button type="button" class="btn" id="ebFree">Créer un ebook libre</button></div>');
+  $('#aReport').hidden=false;aCur=d;
 }
 $('#aGo').onclick=async()=>{
   if(aBusy)return;
@@ -794,6 +859,61 @@ function aWatch(id){
 }
 function aShowSaved(){try{const s=localStorage.getItem('auReport');if(s){aRender(JSON.parse(s));$('#aState').textContent='Dernier rapport enregistré. Relance l\'analyse pour le mettre à jour.'}}catch(e){}}
 try{const j=localStorage.getItem('auJob');if(j)aWatch(j);else aShowSaved()}catch(e){}
+
+/* ---------- créateur d'ebook ---------- */
+let ebTimer=null,ebBusy=false,ebProduct=null;
+try{$('#ebAuthor').value=localStorage.getItem('ebAuthor')||'';$('#ebShop').value=localStorage.getItem('ebShop')||''}catch(e){}
+document.querySelectorAll('#ebChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#ebChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#ebPages').value=b.dataset.v;$('#ebPagesErr').hidden=true});
+$('#ebPages').oninput=()=>{$('#ebPagesErr').hidden=true;document.querySelectorAll('#ebChips button').forEach(x=>x.classList.toggle('on',x.dataset.v===$('#ebPages').value))};
+function ebOpen(prod){
+  ebProduct=prod||null;
+  $('#ebTitle').value=prod?prod.nom||'':'';$('#ebBrief').value='';
+  $('#ebPanel').hidden=false;if(!ebBusy){$('#ebDone').hidden=true;$('#ebProg').hidden=true}
+  $('#ebPanel').scrollIntoView({behavior:'smooth',block:'start'});setTimeout(()=>$('#ebTitle').focus(),400);
+}
+$('#ebClose').onclick=()=>{$('#ebPanel').hidden=true};
+$('#aReport').addEventListener('click',e=>{
+  const b=e.target.closest('.ebk');if(b&&aCur){ebOpen(L(aCur.report.produits)[+b.dataset.i]);return}
+  if(e.target.closest('#ebFree'))ebOpen(null);
+});
+function ebSetBusy(on){ebBusy=on;$('#ebGo').classList.toggle('busy',on);$('#ebGo').textContent=on?'Kopi écrit ton ebook…':'Créer l\'ebook →';$('#ebBar').classList.toggle('live',on)}
+function ebErr(m){$('#ebState').innerHTML=`<span class="err">${esc(m)}</span>`;ebSetBusy(false)}
+$('#ebGo').onclick=async()=>{
+  if(ebBusy)return;
+  const title=$('#ebTitle').value.trim();if(!title){$('#ebTitle').focus();return}
+  const pages=parseInt($('#ebPages').value,10);if(!(pages>=10&&pages<=100)){$('#ebPagesErr').hidden=false;$('#ebPages').focus();return}
+  const author=$('#ebAuthor').value.trim(),shop=$('#ebShop').value.trim();
+  try{localStorage.setItem('ebAuthor',author);localStorage.setItem('ebShop',shop)}catch(e){}
+  const r=(aCur&&aCur.report)||{};
+  const body={title,pages,author,shop,images:$('#ebImg').checked,brief:$('#ebBrief').value.trim(),
+    product:ebProduct||{},audience:r.audience||{},niche:(r.niche||{}).principale||'',
+    douleurs:L(r.douleurs).map(x=>x.probleme),desirs:L(r.desirs).map(x=>x.desir),
+    others:L(r.produits).map(x=>({nom:x.nom,promesse:x.promesse}))};
+  ebSetBusy(true);$('#ebProg').hidden=false;$('#ebDone').hidden=true;$('#ebFill').style.width='2%';$('#ebPct').textContent='0 %';$('#ebState').textContent='Envoi…';
+  try{const res=await fetch('/api/ebook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await res.json();if(!res.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('ebJob',d.job_id)}catch(e){}ebWatch(d.job_id)}
+  catch(e){ebErr(e.message)}
+};
+function ebWatch(id){
+  clearInterval(ebTimer);ebSetBusy(true);$('#ebPanel').hidden=false;$('#ebProg').hidden=false;
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(ebTimer);ebSetBusy(false);$('#ebProg').hidden=true;try{localStorage.removeItem('ebJob')}catch(_){}if($('#ebDone').hidden&&!aCur)$('#ebPanel').hidden=true;return}
+    $('#ebFill').style.width=Math.max(2,d.pct||0)+'%';$('#ebPct').textContent=Math.round(d.pct||0)+' %';
+    if(!['done','error'].includes(d.phase)){$('#ebState').textContent=d.step||'Préparation…';return}
+    clearInterval(ebTimer);ebSetBusy(false);
+    if(d.phase==='error'){ebErr(d.error);return}
+    const info=await (await fetch('/api/job/'+id+'/ebook')).json();
+    $('#ebProg').hidden=true;$('#ebDone').hidden=false;
+    $('#ebCover').src='/api/job/'+id+'/ebook/cover';
+    $('#ebDoneTitle').textContent=info.title||'';
+    $('#ebDoneMeta').textContent=`${info.pages||'?'} pages · ${(info.toc||[]).length} chapitres`+(info.images?(info.images_ok?` · ${info.images_ok} illustrations IA`:' · visuels graphiques (service d\'images indisponible)'):'');
+    $('#ebToc').innerHTML=(info.toc||[]).map(t=>`<li>${esc(t)}</li>`).join('');
+    $('#ebPdf').href='/api/job/'+id+'/ebook/pdf';$('#ebDocx').href='/api/job/'+id+'/ebook/docx';
+  };
+  tick();ebTimer=setInterval(tick,3000);
+}
+try{const j=localStorage.getItem('ebJob');if(j)ebWatch(j)}catch(e){}
 
 /* ---------- traduction ---------- */
 let tTimer=null,tBusy=false;

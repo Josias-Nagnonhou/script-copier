@@ -1923,10 +1923,11 @@ def run_kit_job(job, meta, cover_src, about):
         wide = os.path.join(d, f"{safe}_16x9.jpg")
         KIT.wide_visual(cover, wide, {"title": meta.get("title") or "", "subtitle": meta.get("subtitle") or "",
                                       "points": points, "price": meta.get("price") or "", "label": meta.get("label") or "Ebook PDF",
-                                      "author": meta.get("author") or ""}, pal, uni)
+                                      "author": meta.get("author") or "", "pages": meta.get("page_count") or 0},
+                        pal, uni, pdf=meta.get("pdf_path"))
         job["step"], job["pct"] = "Création du visuel carré…", 88
         square = os.path.join(d, f"{safe}_carre.jpg")
-        KIT.square_visual(cover, square, pal, uni)
+        KIT.square_visual(cover, square, pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
         zp = os.path.join(d, f"{safe}_kit.zip")
         with zipfile.ZipFile(zp, "w", zipfile.ZIP_STORED) as z:
             z.write(wide, os.path.basename(wide)); z.write(square, os.path.basename(square))
@@ -1961,6 +1962,8 @@ def start_kit():
             return jsonify(error="Cet ebook n'est plus sur le serveur (il a peut-être redémarré). Importe sa couverture à la place."), 404
         meta = dict(ej["meta"])
         cover_src = ej["cover_hd"]
+        if os.path.exists(ej.get("pdf") or ""):
+            meta["pdf_path"], meta["page_count"] = ej["pdf"], ej.get("page_count") or 0
     else:
         f = request.files.get("file")
         if not f or not f.filename:
@@ -1981,6 +1984,8 @@ def start_kit():
             about = (about + " " + KIT.pdf_text(cover_src)).strip()
         meta = {"title": title, "subtitle": (form.get("subtitle") or "").strip()[:160],
                 "author": (form.get("author") or "").strip()[:60]}
+        if ext == ".pdf":
+            meta["pdf_path"] = cover_src
     meta.update({k: v for k, v in (("price", price), ("label", label), ("points", points)) if v})
     if not meta.get("label"):
         meta["label"] = "Ebook PDF"

@@ -198,6 +198,20 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .muted{color:var(--muted);margin:0 0 10px}
 .ebtoc{margin:0 0 14px;padding-left:20px;display:grid;gap:4px;font-weight:600;font-size:14px}
 .ebacts{display:flex;gap:10px;flex-wrap:wrap}.ebacts .btn{flex:1;min-width:170px}
+.kinfo{background:var(--soft);border-radius:14px;padding:14px 16px;margin:0 0 4px;line-height:1.55}
+.ktext{width:100%;resize:vertical;padding:12px 14px;border:1px solid var(--line);border-radius:13px;background:var(--soft);color:var(--ink);font:500 14px/1.55 var(--body);min-width:0}
+.kres{margin-top:22px;display:grid;gap:16px}
+.kvis{display:grid;grid-template-columns:minmax(0,16fr) minmax(0,9fr);gap:14px;align-items:start}
+@media (max-width:720px){.kvis{grid-template-columns:1fr}}
+.kfig{margin:0;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;min-width:0}
+.kfig img{display:block;width:100%;background:var(--soft);max-width:100%}
+.kwide img{aspect-ratio:16/9}.ksq img{aspect-ratio:1/1}
+.kfig figcaption{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;flex-wrap:wrap}
+.kfig figcaption .btn{padding:9px 16px;min-width:0}
+.kcopyh{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.kcopyh h3{margin:0}.kcopyh .btn{min-width:200px}
+.kline{display:flex;gap:8px}.kline input{flex:1;min-width:0}.kline .btn{flex:none;padding:10px 16px}
+.kdesc{min-height:330px;font-size:15px;line-height:1.65}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px;margin:-8px 0 26px;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
 .modes::-webkit-scrollbar{display:none}
@@ -275,7 +289,63 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr" title="Traduire un texte"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.6 3.4 2.8 6 6 7.5M11 5c-.7 3.6-3.2 6.6-6.5 8"/><path d="m12.5 21 4-9 4 9M14 17.5h5"/></svg><span>Traduire</span></button>
     <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd" title="Photos et médias d'un post X ou TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="m21 16-4.5-4.5L7 21"/></svg><span>Photos</span></button>
     <button role="tab" id="tabAu" aria-selected="false" aria-controls="modeAu" title="Analyser ton audience et savoir quoi lui vendre"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5h18M6 16.5V12M10.5 16.5V8M15 16.5v-5M19.5 16.5V5"/></svg><span>Monétiser</span></button>
+    <button role="tab" id="tabKit" aria-selected="false" aria-controls="modeKit" title="Visuels et description pour vendre ton ebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5 11 5h8v8l-7.5 7.5a1.5 1.5 0 0 1-2.1 0l-5.9-5.9a1.5 1.5 0 0 1 0-2.1z"/><circle cx="15.5" cy="8.5" r="1.4"/></svg><span>Kit de vente</span></button>
   </nav>
+
+  <div id="modeKit" role="tabpanel" hidden>
+    <h1>Ton ebook est prêt.<br>Crée <span>ce qui le fait vendre</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <div class="seg" id="kSrc"><button data-s="kopi" class="on">Mon ebook Kopi</button><button data-s="up">Importer une couverture</button></div>
+        <div id="kKopi"><p class="kinfo" id="kKopiInfo"></p></div>
+        <div id="kUp" hidden>
+          <label class="drop fdrop" id="kDrop" for="kFile">
+            <input type="file" id="kFile" accept="image/*,.pdf,.heic">
+            <span class="fic" aria-hidden="true">▣</span>
+            <b id="kFileName">Choisir la couverture ou le PDF de l'ebook</b>
+            <small>JPG, PNG ou PDF · avec le PDF, l'IA lit aussi le contenu pour la description</small>
+          </label>
+          <div class="grid">
+            <div><label for="kTitle">Titre de l'ebook</label><input id="kTitle" autocomplete="off"></div>
+            <div><label for="kAuthor">Auteur ou marque</label><input id="kAuthor" autocomplete="off"></div>
+          </div>
+          <label for="kSub" style="margin-top:12px">Sous-titre ou promesse <small class="opt">(facultatif)</small></label>
+          <input id="kSub" autocomplete="off">
+          <label for="kAbout" style="margin-top:12px">De quoi parle le livre ? <small class="opt">(facultatif si tu importes le PDF)</small></label>
+          <textarea id="kAbout" rows="3" class="ktext" placeholder="Les chapitres, à qui il s'adresse, ce qu'il apporte…"></textarea>
+        </div>
+        <div class="grid">
+          <div><label for="kPrice">Prix affiché <small class="opt">(facultatif)</small></label><input id="kPrice" autocomplete="off" placeholder="5 000 FCFA"></div>
+          <div><label for="kLabel">Étiquette <small class="opt">(facultatif)</small></label><input id="kLabel" autocomplete="off" placeholder="Ebook PDF"></div>
+        </div>
+        <label for="kPoints" style="margin-top:12px">3 points forts pour le visuel <small class="opt">(facultatif, un par ligne : sinon l'IA les choisit)</small></label>
+        <textarea id="kPoints" rows="3" class="ktext"></textarea>
+        <button class="go" id="kGo">Créer le kit de vente →</button>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Progression</span>
+        <div class="big"><span id="kPct">0</span><small>%</small></div>
+        <div class="bar" id="kBar"><i id="kFill"></i></div>
+        <div class="state" id="kState"><span class="empty">Un visuel 16:9 pour ta boutique, un visuel carré et une description qui vend.</span></div>
+        <div class="acts"><a class="btn dl" id="kZip" href="#" aria-disabled="true">Tout télécharger (ZIP)</a></div>
+      </aside>
+    </div>
+    <section id="kRes" class="kres" hidden>
+      <div class="kvis">
+        <figure class="kfig kwide"><img id="kWide" alt="Visuel 16:9 de l'ebook"><figcaption><b>Visuel boutique · 16:9</b><a class="btn" id="kWideDl" href="#">Télécharger</a></figcaption></figure>
+        <figure class="kfig ksq"><img id="kSq" alt="Visuel carré de l'ebook"><figcaption><b>Visuel carré</b><a class="btn" id="kSqDl" href="#">Télécharger</a></figcaption></figure>
+      </div>
+      <section class="rsec kcopy">
+        <div class="kcopyh"><h3>Description de vente</h3><button type="button" class="btn dl" id="kCopyDesc">Copier la description</button></div>
+        <label for="kPTitle">Titre de la fiche produit</label>
+        <div class="kline"><input id="kPTitle"><button type="button" class="btn" id="kCopyTitle">Copier</button></div>
+        <label for="kDesc" style="margin-top:12px">Description <small class="opt">(tu peux la modifier avant de copier)</small></label>
+        <textarea id="kDesc" rows="16" class="ktext kdesc"></textarea>
+        <label for="kHook" style="margin-top:12px">Accroche pour tes réseaux</label>
+        <div class="kline"><input id="kHook"><button type="button" class="btn" id="kCopyHook">Copier</button></div>
+      </section>
+    </section>
+  </div>
 
   <div id="modeCl" role="tabpanel" hidden>
     <h1>Colle une longue vidéo.<br>Récupère <span>les moments viraux</span>.</h1>
@@ -386,6 +456,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           <p id="ebDoneMeta" class="muted"></p>
           <ol id="ebToc" class="ebtoc"></ol>
           <div class="ebacts"><a class="btn dl" id="ebPdf" href="#">Télécharger le PDF</a><a class="btn" id="ebDocx" href="#">Word modifiable</a></div>
+          <button type="button" class="btn ebk" id="ebKit" style="margin-top:10px">Créer les visuels et la description de vente →</button>
           <p class="hint">Relis-le avant de le vendre : vérifie les références (versets, chiffres) et ajoute ta touche personnelle dans la version Word.</p>
         </div>
       </div>
@@ -628,7 +699,7 @@ function copyText(t,btn,label){
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
 }
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu']};
+const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -910,10 +981,68 @@ function ebWatch(id){
     $('#ebDoneMeta').textContent=`${info.pages||'?'} pages · ${(info.toc||[]).length} chapitres`+(info.univers?` · univers ${info.univers}`:'')+(info.images?(info.images_ok?` · ${info.images_ok} illustrations IA`:' · visuels graphiques (service d\'images indisponible)'):'');
     $('#ebToc').innerHTML=(info.toc||[]).map(t=>`<li>${esc(t)}</li>`).join('');
     $('#ebPdf').href='/api/job/'+id+'/ebook/pdf';$('#ebDocx').href='/api/job/'+id+'/ebook/docx';
+    try{localStorage.setItem('ebDoneId',id);localStorage.setItem('ebDoneTitle',info.title||'')}catch(e){}
+    $('#ebKit').onclick=()=>{kUseKopi();kSetSrc('kopi');setMode('kit');window.scrollTo({top:0,behavior:'smooth'})};
   };
   tick();ebTimer=setInterval(tick,3000);
 }
 try{const j=localStorage.getItem('ebJob');if(j)ebWatch(j)}catch(e){}
+
+/* ---------- kit de vente ---------- */
+let kSrc='kopi',kFileObj=null,kTimer=null,kBusy=false;
+function kUseKopi(){
+  let id='',t='';try{id=localStorage.getItem('ebDoneId')||'';t=localStorage.getItem('ebDoneTitle')||''}catch(e){}
+  $('#kKopiInfo').innerHTML=id?`Ebook utilisé : <b>${esc(t)}</b>. Kopi reprend sa couverture, ses couleurs et son contenu.`:'Aucun ebook créé avec Kopi pour l\'instant. Crée-en un dans l\'onglet <b>Monétiser</b>, ou importe une couverture.';
+  return id;
+}
+function kSetSrc(v){kSrc=v;document.querySelectorAll('#kSrc button').forEach(b=>b.classList.toggle('on',b.dataset.s===v));$('#kKopi').hidden=v!=='kopi';$('#kUp').hidden=v!=='up'}
+document.querySelectorAll('#kSrc button').forEach(b=>b.onclick=()=>kSetSrc(b.dataset.s));
+if(!kUseKopi())kSetSrc('up');
+try{$('#kAuthor').value=localStorage.getItem('ebAuthor')||''}catch(e){}
+function kPick(f){if(!f)return;kFileObj=f;$('#kFileName').textContent=f.name;$('#kDrop').classList.add('has');
+  if(!$('#kTitle').value)$('#kTitle').value=f.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ')}
+$('#kFile').onchange=e=>kPick(e.target.files[0]);
+['dragenter','dragover'].forEach(t=>$('#kDrop').addEventListener(t,e=>{e.preventDefault();$('#kDrop').classList.add('over')}));
+['dragleave','drop'].forEach(t=>$('#kDrop').addEventListener(t,e=>{e.preventDefault();$('#kDrop').classList.remove('over')}));
+$('#kDrop').addEventListener('drop',e=>kPick(e.dataTransfer.files[0]));
+function kSetBusy(on){kBusy=on;$('#kGo').classList.toggle('busy',on);$('#kGo').textContent=on?'Kopi prépare ton kit…':'Créer le kit de vente →';$('#kBar').classList.toggle('live',on)}
+function kErr(m){$('#kState').innerHTML=`<div class="err">${esc(m)}</div>`;kSetBusy(false)}
+$('#kGo').onclick=async()=>{
+  if(kBusy)return;
+  const fd=new FormData();
+  if(kSrc==='kopi'){const id=kUseKopi();if(!id){kErr('Crée d\'abord un ebook, ou choisis « Importer une couverture ».');return}fd.append('ebook_job',id)}
+  else{if(!kFileObj){kErr('Choisis la couverture ou le PDF de l\'ebook.');return}
+    const t=$('#kTitle').value.trim();if(!t){$('#kTitle').focus();return}
+    fd.append('file',kFileObj);fd.append('title',t);fd.append('subtitle',$('#kSub').value.trim());fd.append('author',$('#kAuthor').value.trim());fd.append('about',$('#kAbout').value.trim())}
+  fd.append('price',$('#kPrice').value.trim());fd.append('label',$('#kLabel').value.trim());fd.append('points',$('#kPoints').value.trim());
+  kSetBusy(true);$('#kRes').hidden=true;$('#kZip').setAttribute('aria-disabled','true');$('#kFill').style.width='3%';$('#kPct').textContent='0';$('#kState').textContent='Envoi…';
+  try{const r=await fetch('/api/kit',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');
+    try{localStorage.setItem('kitJob',d.job_id)}catch(e){}kWatch(d.job_id)}
+  catch(e){kErr(e.message)}
+};
+function kWatch(id){
+  clearInterval(kTimer);kSetBusy(true);
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(kTimer);kSetBusy(false);try{localStorage.removeItem('kitJob')}catch(_){}return}
+    $('#kFill').style.width=Math.max(3,d.pct||0)+'%';$('#kPct').textContent=Math.round(d.pct||0);
+    if(!['done','error'].includes(d.phase)){$('#kState').textContent=d.step||'Préparation…';return}
+    clearInterval(kTimer);kSetBusy(false);
+    if(d.phase==='error'){kErr(d.error);return}
+    const k=await (await fetch('/api/job/'+id+'/kit')).json(),c=k.copy||{},v=Date.now();
+    $('#kWide').src=`/api/job/${id}/kit/wide?v=${v}`;$('#kSq').src=`/api/job/${id}/kit/square?v=${v}`;
+    $('#kWideDl').href=`/api/job/${id}/kit/wide?dl=1`;$('#kSqDl').href=`/api/job/${id}/kit/square?dl=1`;
+    $('#kZip').href=`/api/job/${id}/kit/zip?dl=1`;$('#kZip').setAttribute('aria-disabled','false');
+    $('#kPTitle').value=c.titre_produit||k.title||'';$('#kDesc').value=c.description||'';$('#kHook').value=c.accroche||'';
+    $('#kState').innerHTML=k.copy_error?`<div class="err">${esc(k.copy_error)}</div>`:'Kit prêt : tes visuels et ta description sont juste en dessous.';
+    $('#kRes').hidden=false;
+  };
+  tick();kTimer=setInterval(tick,2000);
+}
+$('#kCopyDesc').onclick=()=>copyText($('#kDesc').value,$('#kCopyDesc'),'Copier la description');
+$('#kCopyTitle').onclick=()=>copyText($('#kPTitle').value,$('#kCopyTitle'),'Copier');
+$('#kCopyHook').onclick=()=>copyText($('#kHook').value,$('#kCopyHook'),'Copier');
+try{const j=localStorage.getItem('kitJob');if(j)kWatch(j)}catch(e){}
 
 /* ---------- traduction ---------- */
 let tTimer=null,tBusy=false;

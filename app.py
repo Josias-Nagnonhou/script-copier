@@ -1600,6 +1600,9 @@ def run_ebook_job(job, ctx):
             prev = os.path.join(d, "preview.jpg")
             pdf[0].render(scale=1.1).to_pil().convert("RGB").save(prev, "JPEG", quality=85)
             job["cover"] = prev
+            hd = os.path.join(d, "cover_hd.jpg")
+            pdf[0].render(scale=2.6).to_pil().convert("RGB").save(hd, "JPEG", quality=92)
+            job["cover_hd"] = hd
             pdf.close()
         except Exception as e:
             print(f"[ebook {job['id']}] aperçu impossible : {e}", flush=True)
@@ -1608,6 +1611,11 @@ def run_ebook_job(job, ctx):
             job["page_count"] = len(PdfReader(job["pdf"]).pages)
         except Exception:
             job["page_count"] = 0
+        job["meta"] = {"title": book["titre"], "subtitle": book["sous_titre"], "benefits": book["benefices"],
+                       "toc": job["toc"], "univers": uni, "colors": pal, "label": book["etiquette"],
+                       "author": book["auteur"], "pages": job.get("page_count"), "pour_qui": book["pour_qui"],
+                       "audience": ctx.get("audience") or {}, "niche": ctx.get("niche"),
+                       "douleurs": ctx.get("douleurs") or [], "desirs": ctx.get("desirs") or []}
         job["phase"], job["pct"], job["step"] = "done", 100, "Ebook prêt"
         print(f"[ebook {job['id']}] terminé ({GOOD_MODEL['name']}) : {job.get('page_count')} pages, "
               f"{imgs_ok} illustrations IA, {os.path.getsize(job['pdf']) // 1024} Ko", flush=True)
@@ -1674,6 +1682,164 @@ def job_ebook_file(jid, kind):
     if kind == "cover":
         return send_file(j[key], mimetype="image/jpeg", max_age=3600)
     return send_file(j[key], as_attachment=True, download_name=f"{j['safe']}.{kind}")
+
+
+# ------------------------------------------------ kit de vente (visuels + description)
+import kit as KIT
+
+
+def gen_sales_copy(meta, about=""):
+    a = meta.get("audience") or {}
+    facts = [f"Titre : {meta.get('title')}", f"Sous-titre : {meta.get('subtitle') or ''}",
+             f"Pour qui : {meta.get('pour_qui') or a.get('profil') or ''}",
+             f"Niche : {meta.get('niche') or ''}",
+             f"Nombre de pages : {meta.get('pages') or 'non précisé'}",
+             "Bénéfices : " + " ; ".join(meta.get("benefits") or []),
+             "Chapitres : " + " | ".join(meta.get("toc") or []),
+             "Douleurs de l'audience : " + " ; ".join(meta.get("douleurs") or []),
+             "Désirs de l'audience : " + " ; ".join(meta.get("desirs") or [])]
+    if meta.get("price"):
+        facts.append(f"Prix : {meta['price']}")
+    if about:
+        facts.append(f"Contenu du livre (extrait ou résumé) : {about[:4000]}")
+    facts = [f for f in facts if f.split(":", 1)[1].strip()]
+    system = ("Tu es un copywriter francophone spécialiste de la vente de produits digitaux en Afrique francophone "
+              "et dans la diaspora (boutiques en ligne type Chariow). Tu écris des descriptions qui donnent envie "
+              "d'acheter tout en restant honnêtes : pas de faux témoignages, pas de chiffres inventés, pas de "
+              "promesse de résultat garanti, pas de fausse urgence. Tutoiement, phrases courtes, ton chaleureux et sûr.")
+    user = ("Écris la page de vente de cet ebook.\n" + "\n".join(facts) + "\n\n"
+            "Réponds UNIQUEMENT en JSON : {\"titre_produit\": \"titre de la fiche produit (max 80 caractères)\", "
+            "\"accroche\": \"1 phrase choc pour les réseaux sociaux\", "
+            "\"points_forts\": [\"3 bénéfices très courts (max 42 caractères chacun) pour le visuel\"], "
+            "\"description\": \"la description complète, 180 à 260 mots, en texte brut prêt à coller : une accroche qui parle "
+            "du problème du lecteur, ce que le livre va changer pour lui, une liste « Dans ce guide, tu vas découvrir : » "
+            "de 5 ou 6 points commençant par ✅, pour qui il est fait, ce qu'il reçoit (format PDF, nombre de pages si connu), "
+            "et un appel à l'action final. Sauts de ligne entre les parties. 4 émojis maximum en dehors des ✅.\"}")
+    raw = groq_chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    max_tokens=2500, json_mode=True, tag="kit")
+    out = parse_json_loose(raw)
+    out["points_forts"] = [p.strip()[:48] for p in (out.get("points_forts") or []) if isinstance(p, str) and p.strip()][:3]
+    out["description"] = (out.get("description") or "").replace("\\n", "\n").strip()
+    return out
+
+
+def run_kit_job(job, meta, cover_src, about):
+    print(f"[kit {job['id']}] « {meta.get('title')} »", flush=True)
+    d = os.path.join(BASE, "k_" + job["id"])
+    os.makedirs(d, exist_ok=True)
+    job["dir"] = d
+    try:
+        job["phase"] = "transcribing"
+        job["step"], job["pct"] = "Préparation de la couverture…", 8
+        cover = os.path.join(d, "cover.jpg")
+        KIT.cover_from_upload(cover_src, cover)
+        pal = meta.get("colors") or KIT.palette_from_image(cover)
+        uni = meta.get("univers") or "moderne"
+        copy = {}
+        if GROQ_KEY:
+            job["step"], job["pct"] = "Écriture de la description de vente…", 25
+            try:
+                copy = gen_sales_copy(meta, about)
+            except Exception as e:
+                print(f"[kit {job['id']}] description impossible : {str(e)[:160]}", flush=True)
+                job["copy_error"] = "La description n'a pas pu être écrite (limite Groq ?). Relance dans quelques minutes."
+        points = [p for p in (meta.get("points") or []) if p][:3] or copy.get("points_forts") or \
+            [b[:48] for b in (meta.get("benefits") or [])][:3]
+        safe = re.sub(r"[^\w-]+", "_", meta.get("title") or "ebook")[:40].strip("_") or "ebook"
+        job["step"], job["pct"] = "Création du visuel 16:9…", 70
+        wide = os.path.join(d, f"{safe}_16x9.jpg")
+        KIT.wide_visual(cover, wide, {"title": meta.get("title") or "", "subtitle": meta.get("subtitle") or "",
+                                      "points": points, "price": meta.get("price") or "", "label": meta.get("label") or "Ebook PDF",
+                                      "author": meta.get("author") or ""}, pal, uni)
+        job["step"], job["pct"] = "Création du visuel carré…", 88
+        square = os.path.join(d, f"{safe}_carre.jpg")
+        KIT.square_visual(cover, square, pal, uni)
+        zp = os.path.join(d, f"{safe}_kit.zip")
+        with zipfile.ZipFile(zp, "w", zipfile.ZIP_STORED) as z:
+            z.write(wide, os.path.basename(wide)); z.write(square, os.path.basename(square))
+            if copy.get("description"):
+                z.writestr(f"{safe}_description.txt", (copy.get("titre_produit", "") + "\n\n" + copy["description"]
+                                                       + ("\n\n" + copy["accroche"] if copy.get("accroche") else "")).encode("utf-8"))
+        job.update(kit={"wide": wide, "square": square, "zip": zp}, copy=copy)
+        job["phase"], job["pct"], job["step"] = "done", 100, "Kit prêt"
+        print(f"[kit {job['id']}] terminé (description : {'oui' if copy.get('description') else 'non'})", flush=True)
+    except Exception as e:
+        msg = str(e)
+        print(f"[kit {job['id']}] erreur : {msg[:200]}", flush=True)
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        job["finished"] = time.time()
+
+
+@app.post("/api/kit")
+def start_kit():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    cleanup()
+    form = request.form if request.files or request.form else (request.get_json(force=True, silent=True) or {})
+    price = re.sub(r"\s+", " ", (form.get("price") or "")).strip()[:30]
+    label = re.sub(r"\s+", " ", (form.get("label") or "")).strip()[:28]
+    points = [p.strip()[:48] for p in re.split(r"[\n;]+", form.get("points") or "") if p.strip()][:3]
+    about = ""
+    eid = form.get("ebook_job")
+    if eid:
+        ej = JOBS.get(eid)
+        if not ej or ej.get("phase") != "done" or not os.path.exists(ej.get("cover_hd", "")):
+            return jsonify(error="Cet ebook n'est plus sur le serveur (il a peut-être redémarré). Importe sa couverture à la place."), 404
+        meta = dict(ej["meta"])
+        cover_src = ej["cover_hd"]
+    else:
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return jsonify(error="Importe la couverture de ton ebook (image ou PDF)."), 400
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".pdf", ".heic"):
+            return jsonify(error="Format non pris en charge : utilise une image (JPG, PNG) ou le PDF de l'ebook."), 400
+        title = re.sub(r"\s+", " ", (form.get("title") or "")).strip()[:120]
+        if not title:
+            return jsonify(error="Indique le titre de l'ebook."), 400
+        up = tempfile.mkdtemp(dir=BASE)
+        cover_src = os.path.join(up, "upload" + ext)
+        f.save(cover_src)
+        if ext == ".heic":
+            cover_src = to_jpeg(cover_src)
+        about = (form.get("about") or "").strip()[:3000]
+        if ext == ".pdf":
+            about = (about + " " + KIT.pdf_text(cover_src)).strip()
+        meta = {"title": title, "subtitle": (form.get("subtitle") or "").strip()[:160],
+                "author": (form.get("author") or "").strip()[:60]}
+    meta.update({k: v for k, v in (("price", price), ("label", label), ("points", points)) if v})
+    if not meta.get("label"):
+        meta["label"] = "Ebook PDF"
+    job = {"id": uuid.uuid4().hex[:12], "platform": "kit", "source": meta["title"], "url": "", "limit": 0, "sort": "",
+           "lang": "", "phase": "queued", "items": [], "source_name": meta["title"], "error": "", "created": time.time(),
+           "step": "En attente…", "pct": 0}
+    with LOCK:
+        JOBS[job["id"]] = job
+    threading.Thread(target=run_kit_job, args=(job, meta, cover_src, about), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.get("/api/job/<jid>/kit")
+def job_kit(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("phase") != "done":
+        return jsonify(error="Kit introuvable"), 404
+    return jsonify(title=j["source_name"], copy=j.get("copy") or {}, copy_error=j.get("copy_error", ""))
+
+
+@app.get("/api/job/<jid>/kit/<kind>")
+def job_kit_file(jid, kind):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    k = (j or {}).get("kit") or {}
+    path = k.get(kind)
+    if not path or not os.path.exists(path):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance.", 404
+    return send_file(path, as_attachment=request.args.get("dl") == "1", download_name=os.path.basename(path), max_age=600)
 
 
 @app.get("/api/job/<jid>/report")

@@ -260,6 +260,11 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .cacts [aria-disabled="true"]{opacity:.45;pointer-events:none}
 @media (max-width:560px){.cl{grid-template-columns:104px minmax(0,1fr);gap:12px;padding:12px}.cvid{width:104px}.ctitle{font-size:16px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.ebacts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 4px}
+.ebacts .ebcount{font-weight:700;font-size:13px;margin-right:4px;opacity:.85}
+.ebacts .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.22);color:inherit;padding:9px 14px;border-radius:999px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.ebacts .btn.ghost:hover{border-color:#d7ff3a;color:#d7ff3a}
+.ebacts .btn.ghost[disabled]{opacity:.5;cursor:wait}
 </style>
 </head>
 <body>
@@ -475,7 +480,13 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
       <div class="ebprog" id="ebProg" hidden>
         <div class="bar" id="ebBar"><i id="ebFill"></i></div>
         <div class="ebstate"><b id="ebPct">0 %</b><span id="ebState">Préparation…</span></div>
-        <p class="hint">Compte 3 à 12 minutes selon le nombre de pages. Tu peux fermer la page : la création continue, et tu la retrouves ici.</p>
+        <div class="ebacts" id="ebActs" hidden>
+          <span class="ebcount" id="ebCount"></span>
+          <button type="button" class="btn ghost" id="ebPauseBtn">Mettre en pause</button>
+          <button type="button" class="btn ghost" id="ebDraftBtn">Télécharger le livre en cours (PDF)</button>
+          <button type="button" class="btn dl" id="ebResumeBtn" hidden>Reprendre la création</button>
+        </div>
+        <p class="hint">Compte 3 à 12 minutes selon le nombre de pages. Tu peux fermer la page : la création continue, et tu la retrouves ici. Si la limite gratuite de Groq est atteinte, la création se met en pause toute seule : rien n'est perdu, tu télécharges ce qui est déjà écrit et tu reprends plus tard.</p>
       </div>
       <div class="ebdone" id="ebDone" hidden>
         <img id="ebCover" alt="Couverture de l'ebook">
@@ -1023,13 +1034,19 @@ function ebWatch(id){
       $('#ebProg').hidden=true;if($('#ebDone').hidden&&!aCur)$('#ebPanel').hidden=true;return}
     $('#ebFill').style.width=Math.max(2,d.pct||0)+'%';$('#ebPct').textContent=Math.round(d.pct||0)+' %';
     ebSave(id,d);
-    if(!['done','error'].includes(d.phase)){$('#ebState').textContent=d.step||'Préparation…';return}
+    if(!['done','error'].includes(d.phase)){$('#ebState').textContent=d.step||'Préparation…';
+      ebActs(d,true,false);
+      $('#ebDraftBtn').onclick=()=>ebDraft('/api/job/'+id+'/draft',null,$('#ebDraftBtn'));
+      $('#ebPauseBtn').onclick=async()=>{$('#ebPauseBtn').disabled=true;$('#ebPauseBtn').textContent='Mise en pause…';try{await fetch('/api/job/'+id+'/pause',{method:'POST'})}catch(e){}};
+      return}
     clearInterval(ebTimer);ebSetBusy(false);
     if(d.phase==='done'){try{localStorage.removeItem('ebSave')}catch(e){}}
     if(d.phase==='error'){ebErr(d.error);
-      if(d.resumable){$('#ebState').insertAdjacentHTML('beforeend',' <button type="button" class="btn dl ebresume" id="ebResume">Reprendre la création</button>');
-        $('#ebResume').onclick=async()=>{try{const r=await fetch('/api/job/'+id+'/resume',{method:'POST'});const x=await r.json();if(!r.ok)throw new Error(x.error);ebWatch(id)}catch(e){ebErr(e.message)}}}
+      ebActs(d,false,true);
+      $('#ebDraftBtn').onclick=()=>ebDraft('/api/job/'+id+'/draft',null,$('#ebDraftBtn'));
+      $('#ebResumeBtn').onclick=async()=>{try{const r=await fetch('/api/job/'+id+'/resume',{method:'POST'});const x=await r.json();if(!r.ok)throw new Error(x.error);ebWatch(id)}catch(e){ebErr(e.message)}};
       return}
+    $('#ebActs').hidden=true;
     const info=await (await fetch('/api/job/'+id+'/ebook')).json();
     $('#ebProg').hidden=true;$('#ebDone').hidden=false;
     $('#ebCover').src='/api/job/'+id+'/ebook/cover';
@@ -1107,6 +1124,26 @@ async function ebSave(id,d){
   if(Date.now()-ebLastSave<20000&&d.phase!=='error')return;ebLastSave=Date.now();
   try{const r=await fetch('/api/job/'+id+'/state');if(!r.ok)return;const x=await r.json();localStorage.setItem('ebSave',JSON.stringify(x))}catch(e){}
 }
+function ebActs(d,running,resume){
+  const a=$('#ebActs'),w=d.written||0,t=d.total_ch||0;
+  a.hidden=!t;$('#ebCount').textContent=t?`${w}/${t} chapitres écrits`:'';
+  $('#ebPauseBtn').hidden=!running;
+  if(running&&!$('#ebPauseBtn').disabled)$('#ebPauseBtn').textContent='Mettre en pause';
+  if(!running){$('#ebPauseBtn').disabled=false}
+  $('#ebDraftBtn').hidden=!w;$('#ebResumeBtn').hidden=!resume;
+}
+async function ebDraft(url,save,btn){
+  const lab=btn.textContent;btn.disabled=true;btn.textContent='Préparation du PDF…';
+  try{
+    const r=save?await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(save)}):await fetch(url);
+    if(!r.ok){let m='Impossible de créer le PDF';try{m=(await r.json()).error||m}catch(e){}throw new Error(m)}
+    const cd=r.headers.get('Content-Disposition')||'',m=cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i);
+    const blob=await r.blob(),u=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=u;a.download=m?decodeURIComponent(m[1]):'livre_inacheve.pdf';document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),60000);btn.textContent='PDF téléchargé ✓';setTimeout(()=>{btn.textContent=lab},2500);
+  }catch(e){btn.textContent=e.message;setTimeout(()=>{btn.textContent=lab},4000)}
+  finally{btn.disabled=false}
+}
 function ebSavedOk(){try{const x=JSON.parse(localStorage.getItem('ebSave')||'null');return !!(x&&x.st&&x.st.plan)}catch(e){return false}}
 function ebOfferRestore(){
   let x=null;try{x=JSON.parse(localStorage.getItem('ebSave'))}catch(e){}
@@ -1114,6 +1151,8 @@ function ebOfferRestore(){
   $('#ebPanel').hidden=false;$('#ebProg').hidden=false;$('#ebDone').hidden=true;
   const tot=(x.st.plan.chapitres||[]).length;
   $('#ebState').innerHTML=`<span class="err">Le serveur a redémarré pendant la création de « ${esc(x.ctx.title)} ». ${x.written}/${tot} chapitres étaient déjà écrits et sont sauvegardés sur cet appareil.</span> <button type="button" class="btn dl ebresume" id="ebRestore">Reprendre la création</button> <button type="button" class="linkbtn" id="ebForget">Abandonner</button>`;
+  ebActs({written:x.written,total_ch:tot},false,false);
+  $('#ebDraftBtn').onclick=()=>ebDraft('/api/ebook/draft',x,$('#ebDraftBtn'));
   $('#ebRestore').onclick=async()=>{try{const r=await fetch('/api/ebook/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(x)});
     const d=await r.json();if(!r.ok)throw new Error(d.error);try{localStorage.setItem('ebJob',d.job_id)}catch(e){}ebWatch(d.job_id)}catch(e){ebErr(e.message)}};
   $('#ebForget').onclick=()=>{try{localStorage.removeItem('ebSave')}catch(e){};$('#ebProg').hidden=true;$('#ebPanel').hidden=!aCur};

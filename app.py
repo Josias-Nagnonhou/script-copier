@@ -498,7 +498,13 @@ def job_status(jid):
                    platform=j["platform"], items=items, has_file=bool(j.get("file")),
                    part=j.get("part", 0), parts=j.get("parts", 0), duration=j.get("duration", 0),
                    zip_size=j.get("zip_size", 0), step=j.get("step", ""), pct=j.get("pct", 0),
-                   resumable=j.get("resumable", False))
+                   resumable=j.get("resumable", False), paused=j.get("paused", False),
+                   written=_written(j), total_ch=len(((j.get("st") or {}).get("plan") or {}).get("chapitres") or []))
+
+
+def _written(j):
+    chs = ((j.get("st") or {}).get("plan") or {}).get("chapitres") or []
+    return sum(1 for c in chs if c.get("texte"))
 
 
 @app.get("/api/job/<jid>/text")
@@ -1547,14 +1553,86 @@ def start_audit():
 import ebook as EB
 
 
+class EbookPaused(Exception):
+    pass
+
+
+def build_draft_pdf(st, ctx, out):
+    """Construit un PDF « version inachevée » avec tout ce qui est déjà écrit."""
+    plan = st.get("plan") or {}
+    chs = []
+    for c in plan.get("chapitres") or []:
+        txt = c.get("texte") or "\n\n".join(c.get("parts") or [])
+        if txt.strip():
+            chs.append(dict(c, texte=txt, img=c.get("img") if c.get("img") and os.path.exists(c.get("img")) else None))
+    if not chs and not st.get("intro"):
+        raise RuntimeError("Rien n'est encore écrit : attends la fin du premier chapitre.")
+    uni, pal = EB.resolve_design(plan.get("design"))
+    cover = out + ".cover.jpg"
+    cw, chh = EB.cover_size(uni)
+    EB.make_art(pal, cover, cw, chh, 7)
+    book = {"titre": plan.get("titre") or ctx.get("title") or "Ebook", "sous_titre": plan.get("sous_titre", ""),
+            "pour_qui": plan.get("pour_qui", ""), "benefices": plan.get("ce_que_tu_vas_obtenir") or [],
+            "avertissement": plan.get("avertissement", ""), "univers": uni, "colors": pal,
+            "etiquette": "Version inachevée", "auteur": ctx.get("author") or "", "boutique": "",
+            "cover_img": cover, "intro": st.get("intro") or "", "chapitres": chs,
+            "bonus_titre": (plan.get("bonus") or {}).get("titre") if st.get("bonus") else None,
+            "bonus_texte": st.get("bonus") or "", "conclusion": st.get("concl") or "",
+            "autres_produits": [], "credits": []}
+    EB.build_pdf(book, out)
+    return book["titre"], len(chs)
+
+
+@app.post("/api/job/<jid>/pause")
+def pause_ebook(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "ebook" or j.get("phase") not in ("queued", "transcribing"):
+        return jsonify(error="Aucune création en cours à mettre en pause."), 404
+    j["pause_req"] = True
+    j["step"] = "Mise en pause… (Kopi termine la partie en cours)"
+    return jsonify(ok=True)
+
+
+@app.route("/api/ebook/draft", methods=["POST"])
+@app.route("/api/job/<jid>/draft", methods=["GET"])
+def ebook_draft(jid=None):
+    """PDF du livre tel qu'il est : depuis le serveur (jid) ou depuis la sauvegarde du navigateur (POST)."""
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if jid:
+        j = JOBS.get(jid)
+        if not j or not (j.get("st") or {}).get("plan"):
+            return jsonify(error="Ce livre n'est plus sur le serveur."), 404
+        st, ctx = j["st"], j.get("ctx") or {}
+    else:
+        d = request.get_json(force=True, silent=True) or {}
+        st, ctx = d.get("st") or {}, d.get("ctx") or {}
+        if not isinstance(st.get("plan"), dict):
+            return jsonify(error="Sauvegarde introuvable."), 400
+    tmp = tempfile.mkdtemp(dir=BASE)
+    out = os.path.join(tmp, "brouillon.pdf")
+    try:
+        title, n = build_draft_pdf(st, ctx, out)
+    except Exception as e:
+        return jsonify(error=str(e)[:200]), 400
+    safe = re.sub(r"[^\w-]+", "_", title)[:50].strip("_") or "ebook"
+    return send_file(out, as_attachment=True, download_name=f"{safe}_inacheve_{n}ch.pdf", mimetype="application/pdf", max_age=0)
+
+
 def run_ebook_job(job, ctx):
     print(f"[ebook {job['id']}] « {ctx['title']} » · {job['pages']} pages · images={job['images']}", flush=True)
     d = os.path.join(BASE, "e_" + job["id"])
     os.makedirs(d, exist_ok=True)
     job["dir"] = d
-    chat = lambda m, **k: groq_chat(m, tag="ebook", **k)
+    def chat(m, **k):
+        if job.get("pause_req"):
+            raise EbookPaused()
+        return groq_chat(m, tag="ebook", **k)
     try:
         job["phase"], job["error"], job["resumable"] = "transcribing", "", False
+        job["paused"], job["pause_req"] = False, False
         st = job.setdefault("st", {})  # état conservé : une reprise repart d'ici
         if not st.get("plan"):
             job["step"], job["pct"] = "Conception du plan du livre…", 4
@@ -1706,13 +1784,22 @@ def run_ebook_job(job, ctx):
               f"{imgs_ok} illustrations IA, {os.path.getsize(job['pdf']) // 1024} Ko", flush=True)
     except Exception as e:
         msg = str(e)
-        print(f"[ebook {job['id']}] erreur : {msg[:300]}", flush=True)
+        paused = isinstance(e, EbookPaused)
+        print(f"[ebook {job['id']}] {'mis en pause' if paused else 'erreur : ' + msg[:300]}", flush=True)
+        job["pause_req"] = False
         if job.get("st", {}).get("plan"):
             job["resumable"] = True
-            written = sum(1 for c in job["st"]["plan"]["chapitres"] if c.get("texte"))
-            msg += (f" Rien n'est perdu : {written} chapitre(s) déjà écrit(s). "
-                    "Clique sur « Reprendre la création » (si c'est la limite Groq du jour, attends quelques heures).")
-        job["phase"], job["error"] = "error", msg[:500]
+            job["paused"] = True
+            written, tot = _written(job), len(job["st"]["plan"]["chapitres"])
+            if paused:
+                msg = f"Création en pause : {written}/{tot} chapitres écrits."
+            elif "limite" in msg.lower() or "groq" in msg.lower():
+                msg = (f"Pause automatique : la limite gratuite de Groq est atteinte. {written}/{tot} chapitres sont écrits "
+                       "et gardés. Tu peux télécharger le livre inachevé maintenant, puis reprendre plus tard "
+                       "(la limite se recharge petit à petit, compte quelques heures).")
+            else:
+                msg += f" Rien n'est perdu : {written}/{tot} chapitres écrits. Tu peux reprendre ou télécharger le livre inachevé."
+        job["phase"], job["error"] = "error", msg[:600]
     finally:
         job["finished"] = time.time()
 
@@ -1801,7 +1888,7 @@ def resume_ebook(jid):
     if any(x["platform"] == "ebook" and x["phase"] in ("queued", "transcribing") for x in JOBS.values()):
         return jsonify(error="Un ebook est déjà en cours de création. Attends qu'il se termine."), 409
     j.pop("finished", None)
-    j["phase"], j["step"] = "queued", "Reprise…"
+    j["phase"], j["step"], j["paused"], j["pause_req"] = "queued", "Reprise…", False, False
     threading.Thread(target=run_ebook_job, args=(j, j["ctx"]), daemon=True).start()
     return jsonify(job_id=jid)
 

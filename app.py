@@ -475,7 +475,7 @@ def job_status(jid):
     return jsonify(id=j["id"], phase=j["phase"], error=j["error"], source_name=j["source_name"],
                    platform=j["platform"], items=items, has_file=bool(j.get("file")),
                    part=j.get("part", 0), parts=j.get("parts", 0), duration=j.get("duration", 0),
-                   zip_size=j.get("zip_size", 0))
+                   zip_size=j.get("zip_size", 0), step=j.get("step", ""), pct=j.get("pct", 0))
 
 
 @app.get("/api/job/<jid>/text")
@@ -1084,15 +1084,18 @@ CHAT_MODELS = [m.strip() for m in os.environ.get(
 GOOD_MODEL = {"name": None}
 
 
-def groq_chat(messages, max_tokens=6000):
+def groq_chat(messages, max_tokens=6000, json_mode=False, tag="traduction"):
     models = ([GOOD_MODEL["name"]] if GOOD_MODEL["name"] else []) + [m for m in CHAT_MODELS if m != GOOD_MODEL["name"]]
     last = ""
     for model in models:
+        body = {"model": model, "messages": messages, "temperature": 0.3 if json_mode else 0.2, "max_tokens": max_tokens}
+        if json_mode:
+            body["response_format"] = {"type": "json_object"}
+        if model.startswith("openai/gpt-oss"):
+            body["reasoning_effort"] = "low"  # moins de jetons consommés sur la limite gratuite
         for attempt in range(6):
             r = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                              headers={"Authorization": f"Bearer {GROQ_KEY}"},
-                              json={"model": model, "messages": messages, "temperature": 0.2,
-                                    "max_tokens": max_tokens}, timeout=180)
+                              headers={"Authorization": f"Bearer {GROQ_KEY}"}, json=body, timeout=240)
             if r.status_code == 200:
                 GOOD_MODEL["name"] = model
                 return (r.json()["choices"][0]["message"].get("content") or "").strip()
@@ -1105,12 +1108,17 @@ def groq_chat(messages, max_tokens=6000):
                 continue
             if r.status_code == 401:
                 raise RuntimeError("Clé Groq invalide.")
+            if r.status_code == 400 and ("response_format" in body or "reasoning_effort" in body) and \
+                    any(k in r.text for k in ("response_format", "reasoning_effort", "json")):
+                body.pop("response_format", None)
+                body.pop("reasoning_effort", None)
+                continue  # même modèle, sans les options qu'il refuse
             last = f"{model} : {r.status_code} {r.text[:120]}"
-            print(f"[traduction] modèle refusé {last}", flush=True)
-            break  # modèle indisponible : on essaie le suivant
+            print(f"[{tag}] modèle refusé {last}", flush=True)
+            break  # modèle indisponible ou requête trop grosse : on essaie le suivant
         else:
             raise RuntimeError("Limite Groq atteinte, réessaie dans quelques minutes.")
-    raise RuntimeError(f"Aucun modèle de traduction disponible chez Groq ({last}).")
+    raise RuntimeError(f"Aucun modèle d'IA disponible chez Groq ({last}).")
 
 
 def chunk_text(text, size=2500):
@@ -1215,6 +1223,301 @@ def extract_text():
     except Exception:
         return jsonify(error="Impossible de lire ce fichier."), 400
     return jsonify(text=re.sub(r"\n{3,}", "\n\n", text).strip())
+
+
+# ------------------------------------------------ analyse d'audience et monétisation
+AUDIT_SCHEMA = """{
+ "resume": "3 phrases : de quoi parle la chaîne, pour qui, et la meilleure opportunité de vente",
+ "niche": {"principale": "", "sous_niches": [""], "positionnement": "ce qui rend cette chaîne unique"},
+ "audience": {"profil": "qui regarde (âge estimé, situation, centres d'intérêt)", "langue_pays": "", "niveau": "débutant / intermédiaire / avancé", "motivations": [""], "pouvoir_achat": "estimation honnête et ce que ça implique pour les prix"},
+ "douleurs": [{"probleme": "", "preuve": "titre, extrait de script ou commentaire réel qui le montre"}],
+ "desirs": [{"desir": "", "preuve": ""}],
+ "sujets_porteurs": [{"sujet": "", "pourquoi": "", "exemples": ["titres réels"]}],
+ "produits": [{"nom": "", "format": "ebook, mini-formation vidéo, programme X jours, guide audio, templates, coaching, communauté payante…", "promesse": "le résultat concret promis", "pour_qui": "", "pourquoi_ca_marchera": "lien direct avec les preuves", "contenu": ["modules ou chapitres"], "prix_fcfa": "", "prix_eur": "", "difficulte": "facile / moyen / difficile", "premier_pas": "action concrète pour le valider cette semaine"}],
+ "meilleur_premier_produit": {"nom": "", "raison": ""},
+ "plan_lancement": [{"etape": "", "detail": ""}],
+ "strategie_vente": ["conseils concrets pour vendre via les vidéos, la bio, les lives, les commentaires épinglés, WhatsApp…"],
+ "idees_videos_pour_vendre": ["titres de vidéos qui amènent naturellement vers le produit"],
+ "autres_revenus": ["affiliation, partenariats, dons en live, abonnements…, adaptés à cette chaîne"],
+ "pieges_a_eviter": [""]
+}"""
+
+
+def audit_listing(platform, url, limit):
+    opts = ydl_opts(platform, extract_flat="in_playlist", skip_download=True, ignoreerrors=True, playlistend=limit)
+    with yt_dlp.YoutubeDL(opts) as y:
+        info = y.extract_info(url, download=False)
+    if not info:
+        opts.pop("ignoreerrors")
+        with yt_dlp.YoutubeDL(opts) as y:
+            info = y.extract_info(url, download=False)
+    entries = flatten(info) if info.get("entries") is not None else [info]
+    vids = [{"url": entry_url(e, platform), "title": (e.get("title") or e.get("description") or "").strip(),
+             "views": e.get("view_count") or 0, "duration": e.get("duration") or 0} for e in entries]
+    vids = [v for v in vids if v["url"]][:limit]
+    meta = {"name": info.get("channel") or info.get("uploader") or info.get("title") or url,
+            "followers": info.get("channel_follower_count") or 0,
+            "description": (info.get("description") or "").strip()[:700]}
+    return meta, vids
+
+
+def audit_transcript(platform, url, lang, tmp):
+    """Début du script d'une vidéo (sous-titres, sinon IA sur les 6 premières minutes)."""
+    with yt_dlp.YoutubeDL(ydl_opts(platform, skip_download=True)) as y:
+        info = y.extract_info(url, download=False)
+        cap = pick_caption(info, lang)
+        if cap:
+            try:
+                t = clean_caption_text(y.urlopen(cap[0]).read().decode("utf-8", "ignore"), cap[1])
+                if len(t) > 80:
+                    return t
+            except Exception:
+                pass
+    if not GROQ_KEY:
+        return ""
+    d = tempfile.mkdtemp(dir=tmp)
+    with yt_dlp.YoutubeDL(ydl_opts(platform, format="bestaudio/worst[ext=mp4]/worst/best",
+                                   outtmpl=os.path.join(d, "a.%(ext)s"))) as y:
+        y.extract_info(url, download=True)
+    media = [f for f in glob.glob(os.path.join(d, "a.*")) if not f.endswith(".part")]
+    if not media:
+        return ""
+    out = os.path.join(d, "clip.mp3")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", media[0], "-t", "360", "-vn", "-ac", "1",
+                    "-ar", "16000", "-b:a", "32k", out], check=True)
+    return groq_transcribe(out, lang)
+
+
+def audit_comments(url, n=30):
+    opts = ydl_opts("youtube", skip_download=True, getcomments=True,
+                    extractor_args={"youtube": {"max_comments": [str(n), str(n), "0", "0"], "comment_sort": ["top"]}})
+    with yt_dlp.YoutubeDL(opts) as y:
+        info = y.extract_info(url, download=False)
+    cs = sorted(info.get("comments") or [], key=lambda c: c.get("like_count") or 0, reverse=True)
+    return [(c.get("text") or "").strip().replace("\n", " ")[:220] for c in cs[:n] if (c.get("text") or "").strip()]
+
+
+def parse_json_loose(t):
+    t = re.sub(r"^```(?:json)?|```$", "", t.strip(), flags=re.M).strip()
+    try:
+        return json.loads(t)
+    except Exception:
+        a, b = t.find("{"), t.rfind("}")
+        if a >= 0 and b > a:
+            return json.loads(t[a:b + 1])
+        raise
+
+
+def fmt_num(n):
+    n = int(n or 0)
+    return f"{n / 1e6:.1f} M".replace(".", ",") if n >= 1e6 else f"{n / 1e3:.0f} k" if n >= 1e4 else str(n)
+
+
+def run_audit_job(job):
+    print(f"[analyse {job['id']}] {job['src_platform']} {job['url']} ({job['limit']} vidéos, approfondie={job['deep']})", flush=True)
+    tmp = tempfile.mkdtemp(dir=BASE)
+    try:
+        job["phase"] = "listing"
+        job["step"], job["pct"] = "Lecture des vidéos de la chaîne…", 5
+        meta, vids = audit_listing(job["src_platform"], job["url"], job["limit"])
+        if not vids:
+            raise RuntimeError("Aucune vidéo trouvée sur cette chaîne ou ce compte.")
+        job["source_name"] = meta["name"]
+        job["phase"] = "transcribing"
+        by_views = sorted(vids, key=lambda v: v["views"], reverse=True)
+        has_views = any(v["views"] for v in vids)
+        views = [v["views"] for v in vids if v["views"]]
+        stats = {"videos": len(vids), "followers": meta["followers"],
+                 "moyenne_vues": int(sum(views) / len(views)) if views else 0,
+                 "top": [{"title": v["title"][:120], "views": v["views"], "url": v["url"]} for v in by_views[:5]] if has_views else []}
+        job["stats"] = stats
+        scripts, comments = [], []
+        if job["deep"]:
+            pick = (by_views if has_views else vids)[:5]
+            for k, v in enumerate(pick, 1):
+                job["step"], job["pct"] = f"Lecture des scripts · vidéo {k}/{len(pick)}", 10 + k * 9
+                try:
+                    t = audit_transcript(job["src_platform"], v["url"], job["lang"], tmp)
+                    if t:
+                        scripts.append((v["title"], t[:1100]))
+                except Exception as e:
+                    msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")[:120]
+                    print(f"[analyse {job['id']}] script ignoré : {msg}", flush=True)
+                    if job["src_platform"] == "youtube" and is_bot_block(msg):
+                        break
+            if job["src_platform"] == "youtube":
+                for k, v in enumerate(pick[:3], 1):
+                    job["step"], job["pct"] = f"Lecture des commentaires · vidéo {k}/3", 58 + k * 5
+                    try:
+                        comments += audit_comments(v["url"], 25)
+                    except Exception as e:
+                        print(f"[analyse {job['id']}] commentaires ignorés : {str(e)[:120]}", flush=True)
+        job["step"], job["pct"] = "Analyse de l'audience par l'IA…", 78
+        lines = [f"{v['title'][:110]} | {fmt_num(v['views']) + ' vues' if v['views'] else 'vues inconnues'}"
+                 + (f" | {int(v['duration'] // 60)} min" if v["duration"] else "") for v in (by_views if has_views else vids)[:45]]
+        data = [f"PLATEFORME : {'YouTube' if job['src_platform'] == 'youtube' else 'TikTok'}",
+                f"NOM : {meta['name']}",
+                f"ABONNÉS : {fmt_num(meta['followers']) if meta['followers'] else 'inconnu'}",
+                f"VUES MOYENNES : {fmt_num(stats['moyenne_vues']) if stats['moyenne_vues'] else 'inconnues'}"]
+        if meta["description"]:
+            data.append(f"DESCRIPTION DE LA CHAÎNE : {meta['description']}")
+        data.append(f"\nVIDÉOS ({len(lines)} sur {len(vids)} analysées, classées par vues décroissantes) :\n" + "\n".join(lines))
+        if scripts:
+            data.append("\nDÉBUT DES SCRIPTS DES VIDÉOS LES PLUS VUES :\n" + "\n\n".join(f"« {t[:90]} » : {x}" for t, x in scripts))
+        if comments:
+            data.append("\nCOMMENTAIRES LES PLUS AIMÉS :\n" + "\n".join(f"- {c}" for c in comments[:45]))
+        system = (
+            "Tu es un expert en monétisation d'audience et en création de produits digitaux pour les créateurs "
+            "francophones (Afrique francophone et diaspora). On te donne les données réelles d'une chaîne. "
+            "Analyse la niche, l'audience, ses problèmes et ses envies, puis propose des produits digitaux "
+            "qu'elle achètera vraiment. Règles : appuie chaque affirmation sur les données fournies (cite des titres, "
+            "des extraits ou des commentaires réels dans les champs « preuve » et « pourquoi_ca_marchera ») ; "
+            "n'invente aucun chiffre ni aucun commentaire ; propose entre 5 et 7 produits variés, du plus simple "
+            "au plus ambitieux ; donne des prix réalistes pour le pouvoir d'achat de l'audience (FCFA et euros) ; "
+            "sois concret, direct et actionnable ; plan de lancement en 5 à 8 étapes ; écris tout en français. "
+            "Réponds UNIQUEMENT avec un objet JSON valide qui suit exactement cette structure :\n" + AUDIT_SCHEMA)
+        raw = groq_chat([{"role": "system", "content": system}, {"role": "user", "content": "\n".join(data)[:14000]}],
+                        max_tokens=7000, json_mode=True, tag="analyse")
+        try:
+            report = parse_json_loose(raw)
+        except Exception:
+            job["step"] = "Mise en forme du rapport…"
+            raw = groq_chat([{"role": "system", "content": "Corrige ce texte pour qu'il devienne un objet JSON valide. Réponds uniquement avec le JSON."},
+                             {"role": "user", "content": raw[:12000]}], max_tokens=7000, json_mode=True, tag="analyse")
+            report = parse_json_loose(raw)
+        report["_sources"] = {"videos": len(vids), "scripts": len(scripts), "commentaires": len(comments)}
+        job["report"] = report
+        job["file"] = os.path.join(BASE, job["id"] + ".docx")
+        job["filename"] = f"Monetisation_{re.sub(r'[^\w-]+', '_', meta['name'])[:30].strip('_') or 'chaine'}.docx"
+        build_audit_docx(job, job["file"])
+        job["phase"], job["pct"], job["step"] = "done", 100, "Rapport prêt"
+        print(f"[analyse {job['id']}] terminée ({GOOD_MODEL['name']}) : {len(report.get('produits') or [])} produits, "
+              f"{len(scripts)} scripts, {len(comments)} commentaires", flush=True)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        if job["src_platform"] == "youtube" and is_bot_block(msg):
+            msg = bot_message()
+        print(f"[analyse {job['id']}] erreur : {msg[:200]}", flush=True)
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        job["finished"] = time.time()
+
+
+def build_audit_docx(job, path):
+    r = job["report"]
+    doc = Document()
+    doc.styles["Normal"].font.name, doc.styles["Normal"].font.size = "Calibri", Pt(11)
+    doc.add_heading(f"Monétisation — {job['source_name']}", 0)
+    meta = doc.add_paragraph()
+    src = r.get("_sources", {})
+    m = meta.add_run(f"{'YouTube' if job['src_platform'] == 'youtube' else 'TikTok'} · {src.get('videos', 0)} vidéos, "
+                     f"{src.get('scripts', 0)} scripts, {src.get('commentaires', 0)} commentaires analysés · "
+                     f"{datetime.datetime.now().strftime('%d/%m/%Y')}")
+    m.font.color.rgb, m.font.size = RGBColor(0x66, 0x66, 0x66), Pt(10)
+
+    def h(t):
+        doc.add_heading(t, 1)
+
+    def bullets(items):
+        for x in items or []:
+            if x:
+                doc.add_paragraph(str(x), style="List Bullet")
+
+    def kv(label, val):
+        if val:
+            p = doc.add_paragraph()
+            p.add_run(label + " : ").bold = True
+            p.add_run(", ".join(val) if isinstance(val, list) else str(val))
+
+    if r.get("resume"):
+        doc.add_paragraph(r["resume"])
+    best = r.get("meilleur_premier_produit") or {}
+    if best.get("nom"):
+        h("Le produit à lancer en premier")
+        p = doc.add_paragraph()
+        p.add_run(best["nom"]).bold = True
+        doc.add_paragraph(best.get("raison", ""))
+    n, a = r.get("niche") or {}, r.get("audience") or {}
+    h("Niche et audience")
+    kv("Niche", n.get("principale")); kv("Sous-niches", n.get("sous_niches")); kv("Positionnement", n.get("positionnement"))
+    kv("Profil", a.get("profil")); kv("Langue et pays", a.get("langue_pays")); kv("Niveau", a.get("niveau"))
+    kv("Motivations", a.get("motivations")); kv("Pouvoir d'achat", a.get("pouvoir_achat"))
+    for title, key, field in (("Ce qui fait mal à ton audience", "douleurs", "probleme"), ("Ce que ton audience veut", "desirs", "desir")):
+        if r.get(key):
+            h(title)
+            for d in r[key]:
+                p = doc.add_paragraph(style="List Bullet")
+                p.add_run(d.get(field, "")).bold = True
+                if d.get("preuve"):
+                    p.add_run(f" — {d['preuve']}")
+    if r.get("sujets_porteurs"):
+        h("Les sujets qui marchent")
+        for t in r["sujets_porteurs"]:
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run(t.get("sujet", "")).bold = True
+            p.add_run(f" — {t.get('pourquoi', '')}")
+    if r.get("produits"):
+        h("Produits digitaux recommandés")
+        for i, pr in enumerate(r["produits"], 1):
+            doc.add_heading(f"{i}. {pr.get('nom', '')}", 2)
+            kv("Format", pr.get("format")); kv("Promesse", pr.get("promesse")); kv("Pour qui", pr.get("pour_qui"))
+            kv("Pourquoi ça marchera", pr.get("pourquoi_ca_marchera"))
+            kv("Prix conseillé", " / ".join(x for x in (pr.get("prix_fcfa"), pr.get("prix_eur")) if x))
+            kv("Difficulté", pr.get("difficulte")); kv("Premier pas", pr.get("premier_pas"))
+            if pr.get("contenu"):
+                doc.add_paragraph().add_run("Contenu :").bold = True
+                bullets(pr["contenu"])
+    if r.get("plan_lancement"):
+        h("Plan de lancement")
+        for i, st in enumerate(r["plan_lancement"], 1):
+            p = doc.add_paragraph()
+            p.add_run(f"{i}. {st.get('etape', '')} : ").bold = True
+            p.add_run(st.get("detail", ""))
+    for title, key in (("Comment vendre", "strategie_vente"), ("Idées de vidéos pour vendre", "idees_videos_pour_vendre"),
+                       ("Autres sources de revenus", "autres_revenus"), ("Pièges à éviter", "pieges_a_eviter")):
+        if r.get(key):
+            h(title)
+            bullets(r[key])
+    doc.save(path)
+
+
+@app.post("/api/audit")
+def start_audit():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not GROQ_KEY:
+        return jsonify(error="La clé Groq n'est pas configurée : l'analyse est impossible."), 400
+    cleanup()
+    d = request.get_json(force=True)
+    platform = "tiktok" if d.get("platform") == "tiktok" else "youtube"
+    raw = (d.get("source") or "").strip()
+    if not raw:
+        return jsonify(error="Colle le lien ou le nom de ta chaîne ou de ton compte."), 400
+    if any(j["platform"] == "audit" and j["phase"] in ("queued", "listing", "transcribing") for j in JOBS.values()):
+        return jsonify(error="Une analyse est déjà en cours. Attends qu'elle se termine."), 409
+    try:
+        limit = max(5, min(int(d.get("limit") or 40), 150))
+    except ValueError:
+        limit = 40
+    job = {"id": uuid.uuid4().hex[:12], "platform": "audit", "src_platform": platform, "source": raw,
+           "url": normalize_source(platform, raw, "videos"), "limit": limit, "deep": bool(d.get("deep", True)),
+           "lang": (d.get("lang") or "").strip()[:5], "phase": "queued", "items": [], "source_name": raw,
+           "error": "", "created": time.time(), "step": "En attente…", "pct": 0}
+    with LOCK:
+        JOBS[job["id"]] = job
+    threading.Thread(target=run_audit_job, args=(job,), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.get("/api/job/<jid>/report")
+def job_report(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("phase") != "done":
+        return jsonify(error="Rapport introuvable"), 404
+    return jsonify(report=j["report"], stats=j.get("stats", {}), name=j["source_name"], platform=j.get("src_platform"))
 
 
 @app.get("/api/job/<jid>/full")

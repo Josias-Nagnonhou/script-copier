@@ -125,6 +125,60 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 .lbl{left:max(10px,env(safe-area-inset-left))}.lbr{right:max(10px,env(safe-area-inset-right))}
 .lbbar{display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;color:#ddd;font-weight:700;font-size:14px;padding-top:12px}
 .lbbar .btn{min-width:220px}
+.acheck{display:flex;gap:10px;align-items:flex-start;margin:16px 0 0;font-size:13px;font-weight:500;color:var(--muted);letter-spacing:0;cursor:pointer}
+.acheck input{width:18px;height:18px;margin-top:2px;accent-color:#111;flex:none}
+.acheck b{color:var(--ink)}
+.report{margin-top:26px;display:grid;gap:16px}
+.rhead h2{font:800 clamp(26px,4.5vw,40px)/1.05 var(--display);letter-spacing:-.03em;margin:4px 0 0;text-wrap:balance}
+.eyebrow{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpis div{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;display:grid;gap:2px}
+.kpis b{font:800 26px var(--display);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.kpis small{color:var(--muted);font-size:12px;font-weight:700}
+.lead{font-size:18px;line-height:1.6;font-weight:600;margin:4px 0;max-width:70ch;text-wrap:pretty}
+.bestbox{background:#111;color:#f3f3ee;border-radius:22px;padding:22px 24px;display:grid;gap:6px}
+.bestbox .eyebrow{color:var(--lime)}
+.bestbox h3{font:800 26px/1.15 var(--display);letter-spacing:-.02em;margin:0;color:#fff}
+.bestbox p{margin:0;color:#d6d6cf;max-width:72ch;line-height:1.6}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:14px}
+.rsec{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:20px;min-width:0}
+.rsec h3{font:800 19px var(--display);letter-spacing:-.02em;margin:0 0 10px}
+.rsec p{margin:0 0 8px;line-height:1.6}
+.big2{font:800 20px/1.3 var(--display);letter-spacing:-.02em}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tags span{background:var(--soft);border-radius:99px;padding:5px 11px;font-size:13px;font-weight:700}
+dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:8px 0;font-size:14px}
+dt{color:var(--muted);font-weight:700}dd{margin:0}
+.rl{margin:0;padding-left:18px;display:grid;gap:8px;line-height:1.55}
+.rl.ev{list-style:none;padding:0}
+.rl.ev li{border-left:3px solid var(--lime);padding:2px 0 2px 12px;border-radius:0;display:grid;gap:2px}
+.rl.ev small{color:var(--muted);font-size:13px}
+.topics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px}
+.topics div{background:var(--soft);border-radius:14px;padding:14px}
+.topics b{font-weight:800}.topics p{margin:4px 0;font-size:14px}.topics small{color:var(--muted);font-size:12px}
+.prods{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+.prod{position:relative;border:1px solid var(--line);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:8px;background:var(--bg);min-width:0}
+.prod.best{border:2px solid #111;background:var(--card)}
+:root[data-theme="dark"] .prod.best{border-color:var(--lime)}
+.badge{align-self:flex-start;background:var(--lime);color:#111;font-size:11px;font-weight:800;border-radius:99px;padding:4px 10px}
+.ptop{display:flex;gap:12px;align-items:flex-start}
+.pn{font:800 15px var(--display);color:var(--muted);padding-top:3px;font-variant-numeric:tabular-nums}
+.prod h4{font:800 18px/1.25 var(--display);margin:0;letter-spacing:-.01em}
+.prod .ptop small{color:var(--muted);font-weight:600}
+.prom{font-weight:700;margin:0}
+.price{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.price b{font:800 20px var(--display);letter-spacing:-.02em}
+.price span{color:var(--muted);font-weight:700}
+.price em{font-style:normal;font-size:12px;font-weight:800;background:var(--soft);border-radius:99px;padding:3px 9px;margin-left:auto}
+.prod p{margin:0;font-size:14px;line-height:1.55}
+.k{display:block;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+.prod details{font-size:14px}.prod summary{cursor:pointer;font-weight:800}
+.step1{background:var(--ok-bg);border-radius:12px;padding:10px 12px;margin-top:auto!important}
+.step1 .k{color:var(--ok)}
+.plan{margin:0;padding:0;list-style:none;counter-reset:s;display:grid;gap:10px}
+.plan li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:2px 10px}
+.plan li::before{content:counter(s);grid-row:span 2;width:30px;height:30px;border-radius:9px;background:#111;color:var(--lime);display:grid;place-items:center;font:800 14px var(--display)}
+.plan p{margin:0;color:var(--muted);font-size:14px}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px;margin:-8px 0 26px;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
 .modes::-webkit-scrollbar{display:none}
@@ -201,6 +255,7 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
     <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl" title="Télécharger les vidéos TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5M5 20.5h14"/></svg><span>TikTok</span></button>
     <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr" title="Traduire un texte"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.6 3.4 2.8 6 6 7.5M11 5c-.7 3.6-3.2 6.6-6.5 8"/><path d="m12.5 21 4-9 4 9M14 17.5h5"/></svg><span>Traduire</span></button>
     <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd" title="Photos et médias d'un post X ou TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="m21 16-4.5-4.5L7 21"/></svg><span>Photos</span></button>
+    <button role="tab" id="tabAu" aria-selected="false" aria-controls="modeAu" title="Analyser ton audience et savoir quoi lui vendre"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5h18M6 16.5V12M10.5 16.5V8M15 16.5v-5M19.5 16.5V5"/></svg><span>Monétiser</span></button>
   </nav>
 
   <div id="modeCl" role="tabpanel" hidden>
@@ -239,6 +294,39 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
       <h2 id="cHead">Moments forts</h2>
       <div class="clips" id="cList"></div>
     </section>
+  </div>
+
+  <div id="modeAu" role="tabpanel" hidden>
+    <h1>Colle ta chaîne.<br>Découvre <span>quoi lui vendre</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <div class="seg" id="aPlat">
+          <button data-p="youtube" class="on">YouTube</button>
+          <button data-p="tiktok">TikTok</button>
+        </div>
+        <label for="aSource">Lien ou nom de ta chaîne / ton compte</label>
+        <input id="aSource" class="bigin" placeholder="@nomdelachaine ou https://www.youtube.com/@..." autocomplete="off">
+        <div class="num">
+          <label>Vidéos à analyser</label>
+          <div class="chips" id="aChips">
+            <button type="button" data-v="20">20</button><button type="button" data-v="40" class="on">40</button><button type="button" data-v="80">80</button><button type="button" data-v="150">150</button>
+          </div>
+        </div>
+        <label class="acheck"><input type="checkbox" id="aDeep" checked> <span><b>Analyse approfondie</b> · lit aussi les scripts des 5 vidéos les plus vues et, sur YouTube, les commentaires les plus aimés (plus précis, 2 à 5 min)</span></label>
+        <button class="go" id="aGo">Analyser mon audience →</button>
+        <p class="hint">L'IA s'appuie sur tes titres, tes scripts et les commentaires publics. Vérifie toujours une idée avant d'y investir.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Progression</span>
+        <div class="big"><span id="aPct">0</span><small>%</small></div>
+        <div class="bar" id="aBar"><i id="aFill"></i></div>
+        <div class="state" id="aState"><span class="empty">Colle ta chaîne pour lancer l'analyse.</span></div>
+        <div class="acts">
+          <a class="btn dl" id="aDl" href="#" aria-disabled="true">Télécharger le rapport (Word)</a>
+        </div>
+      </aside>
+    </div>
+    <section id="aReport" class="report" hidden></section>
   </div>
 
   <div id="modeMd" role="tabpanel" hidden>
@@ -477,7 +565,7 @@ function copyText(t,btn,label){
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
 }
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd']};
+const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -630,6 +718,82 @@ $('#lb').addEventListener('click',e=>{if(e.target.id==='lb')lbClose()});
 document.addEventListener('keydown',e=>{if($('#lb').hidden)return;if(e.key==='Escape')lbClose();if(e.key==='ArrowLeft')lbStep(-1);if(e.key==='ArrowRight')lbStep(1)});
 let lbX=null;$('#lb').addEventListener('touchstart',e=>{lbX=e.touches[0].clientX},{passive:true});
 $('#lb').addEventListener('touchend',e=>{if(lbX===null)return;const dx=e.changedTouches[0].clientX-lbX;if(Math.abs(dx)>50)lbStep(dx<0?1:-1);lbX=null});
+
+/* ---------- monétisation ---------- */
+let aPlat='youtube',aLimit=40,aTimer=null,aBusy=false;
+document.querySelectorAll('#aPlat button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aPlat button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aPlat=b.dataset.p;
+  $('#aSource').placeholder=aPlat==='tiktok'?'@nomducompte ou https://www.tiktok.com/@...':'@nomdelachaine ou https://www.youtube.com/@...'});
+document.querySelectorAll('#aChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aLimit=+b.dataset.v});
+function aSetBusy(on){aBusy=on;$('#aGo').classList.toggle('busy',on);$('#aGo').textContent=on?'Kopi analyse…':'Analyser mon audience →';$('#aBar').classList.toggle('live',on)}
+function aProg(p){$('#aPct').textContent=Math.round(p);$('#aFill').style.width=p+'%'}
+function aErr(m){$('#aState').innerHTML=`<div class="err">${esc(m)}</div>`;aSetBusy(false)}
+const L=v=>Array.isArray(v)?v.filter(Boolean):[];
+function num(n){n=+n||0;return n>=1e6?(n/1e6).toFixed(1).replace('.',',')+' M':n>=1e4?Math.round(n/1e3)+' k':n.toLocaleString('fr-FR')}
+function aRender(d){
+  const r=d.report||{},n=r.niche||{},a=r.audience||{},st=d.stats||{},src=r._sources||{},best=r.meilleur_premier_produit||{};
+  const sec=(t,body)=>body?`<section class="rsec"><h3>${t}</h3>${body}</section>`:'';
+  const ul=xs=>L(xs).length?`<ul class="rl">${L(xs).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'';
+  const ev=(xs,k)=>L(xs).length?`<ul class="rl ev">${L(xs).map(x=>`<li><b>${esc(x[k])}</b>${x.preuve?`<small>${esc(x.preuve)}</small>`:''}</li>`).join('')}</ul>`:'';
+  const prods=L(r.produits).map((p,i)=>{const isBest=best.nom&&p.nom&&p.nom.trim().toLowerCase()===best.nom.trim().toLowerCase();
+    return `<article class="prod${isBest?' best':''}">${isBest?'<span class="badge">À lancer en premier</span>':''}
+      <div class="ptop"><span class="pn">${String(i+1).padStart(2,'0')}</span><div><h4>${esc(p.nom)}</h4><small>${esc(p.format)}</small></div></div>
+      <p class="prom">${esc(p.promesse)}</p>
+      <div class="price"><b>${esc(p.prix_fcfa||'')}</b>${p.prix_eur?`<span>${esc(p.prix_eur)}</span>`:''}${p.difficulte?`<em>${esc(p.difficulte)}</em>`:''}</div>
+      ${p.pour_qui?`<p><span class="k">Pour qui</span>${esc(p.pour_qui)}</p>`:''}
+      ${p.pourquoi_ca_marchera?`<p><span class="k">Pourquoi ça marchera</span>${esc(p.pourquoi_ca_marchera)}</p>`:''}
+      ${L(p.contenu).length?`<details><summary>Contenu du produit</summary>${ul(p.contenu)}</details>`:''}
+      ${p.premier_pas?`<p class="step1"><span class="k">Cette semaine</span>${esc(p.premier_pas)}</p>`:''}
+    </article>`}).join('');
+  const kpi=[[num(src.videos),'vidéos analysées'],[st.followers?num(st.followers):'—','abonnés'],[st.moyenne_vues?num(st.moyenne_vues):'—','vues en moyenne'],[(src.scripts||0)+' · '+(src.commentaires||0),'scripts · commentaires lus']];
+  $('#aReport').innerHTML=`
+    <header class="rhead"><div><span class="eyebrow">${d.platform==='tiktok'?'TikTok':'YouTube'} · rapport de monétisation</span><h2>${esc(d.name||'')}</h2></div></header>
+    <div class="kpis">${kpi.map(k=>`<div><b>${esc(k[0])}</b><small>${k[1]}</small></div>`).join('')}</div>
+    ${r.resume?`<p class="lead">${esc(r.resume)}</p>`:''}
+    ${best.nom?`<div class="bestbox"><span class="eyebrow">Le produit à lancer en premier</span><h3>${esc(best.nom)}</h3><p>${esc(best.raison||'')}</p></div>`:''}
+    <div class="rgrid">
+      ${sec('Ta niche',`<p class="big2">${esc(n.principale||'')}</p>${L(n.sous_niches).length?`<div class="tags">${L(n.sous_niches).map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}${n.positionnement?`<p>${esc(n.positionnement)}</p>`:''}`)}
+      ${sec('Ton audience',`${a.profil?`<p>${esc(a.profil)}</p>`:''}<dl>${a.langue_pays?`<dt>Langue et pays</dt><dd>${esc(a.langue_pays)}</dd>`:''}${a.niveau?`<dt>Niveau</dt><dd>${esc(a.niveau)}</dd>`:''}${a.pouvoir_achat?`<dt>Pouvoir d'achat</dt><dd>${esc(a.pouvoir_achat)}</dd>`:''}</dl>${L(a.motivations).length?`<div class="tags">${L(a.motivations).map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}`)}
+      ${sec('Ce qui fait mal à ton audience',ev(r.douleurs,'probleme'))}
+      ${sec('Ce que ton audience veut',ev(r.desirs,'desir'))}
+    </div>
+    ${L(r.sujets_porteurs).length?sec('Les sujets qui marchent',`<div class="topics">${L(r.sujets_porteurs).map(t=>`<div><b>${esc(t.sujet)}</b><p>${esc(t.pourquoi||'')}</p>${L(t.exemples).length?`<small>${L(t.exemples).map(esc).join(' · ')}</small>`:''}</div>`).join('')}</div>`):''}
+    ${prods?`<section class="rsec"><h3>Produits digitaux recommandés</h3><div class="prods">${prods}</div></section>`:''}
+    ${L(r.plan_lancement).length?sec('Plan de lancement',`<ol class="plan">${L(r.plan_lancement).map(s=>`<li><b>${esc(s.etape)}</b><p>${esc(s.detail||'')}</p></li>`).join('')}</ol>`):''}
+    <div class="rgrid">
+      ${sec('Comment vendre',ul(r.strategie_vente))}
+      ${sec('Idées de vidéos pour vendre',ul(r.idees_videos_pour_vendre))}
+      ${sec('Autres sources de revenus',ul(r.autres_revenus))}
+      ${sec('Pièges à éviter',ul(r.pieges_a_eviter))}
+    </div>`;
+  $('#aReport').hidden=false;
+}
+$('#aGo').onclick=async()=>{
+  if(aBusy)return;
+  const source=$('#aSource').value.trim();if(!source){$('#aSource').focus();return}
+  aSetBusy(true);aProg(0);$('#aDl').setAttribute('aria-disabled','true');
+  try{const r=await fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:aPlat,source,limit:aLimit,deep:$('#aDeep').checked,lang:''})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('auJob',d.job_id)}catch(e){}aWatch(d.job_id)}
+  catch(e){aErr(e.message)}
+};
+function aWatch(id){
+  clearInterval(aTimer);aSetBusy(true);
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(aTimer);aSetBusy(false);try{localStorage.removeItem('auJob')}catch(_){}aShowSaved();return}
+    if(!['done','error'].includes(d.phase)){aProg(Math.max(3,d.pct||0));$('#aState').textContent=d.step||'Préparation…';return}
+    clearInterval(aTimer);aSetBusy(false);
+    if(d.phase==='error'){aErr(d.error);return}
+    aProg(100);
+    const rep=await (await fetch('/api/job/'+id+'/report')).json();
+    $('#aState').textContent='Rapport prêt. Il reste affiché ici même après fermeture.';
+    $('#aDl').href='/api/job/'+id+'/docx';$('#aDl').setAttribute('aria-disabled','false');
+    try{localStorage.setItem('auReport',JSON.stringify(rep))}catch(e){}
+    aRender(rep);
+  };
+  tick();aTimer=setInterval(tick,2500);
+}
+function aShowSaved(){try{const s=localStorage.getItem('auReport');if(s){aRender(JSON.parse(s));$('#aState').textContent='Dernier rapport enregistré. Relance l\'analyse pour le mettre à jour.'}}catch(e){}}
+try{const j=localStorage.getItem('auJob');if(j)aWatch(j);else aShowSaved()}catch(e){}
 
 /* ---------- traduction ---------- */
 let tTimer=null,tBusy=false;

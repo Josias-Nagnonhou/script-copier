@@ -205,7 +205,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 @media (max-width:720px){.kvis{grid-template-columns:1fr}}
 .kfig{margin:0;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;min-width:0}
 .kfig img{display:block;width:100%;background:var(--soft);max-width:100%}
-.kwide img{aspect-ratio:16/9}.ksq img{aspect-ratio:1/1}
+.kwide img{aspect-ratio:16/9}.ksq img{aspect-ratio:1/1}.kst img{aspect-ratio:9/16}.kvis .kwide{grid-column:1/-1}
 .kfig figcaption{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;flex-wrap:wrap}
 .kfig figcaption .btn{padding:9px 16px;min-width:0}
 .kcopyh{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
@@ -348,6 +348,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
       <div class="kvis">
         <figure class="kfig kwide"><img id="kWide" alt="Visuel 16:9 de l'ebook"><figcaption><b>Visuel boutique · 16:9</b><a class="btn" id="kWideDl" href="#">Télécharger</a></figcaption></figure>
         <figure class="kfig ksq"><img id="kSq" alt="Visuel carré de l'ebook"><figcaption><b>Visuel carré</b><a class="btn" id="kSqDl" href="#">Télécharger</a></figcaption></figure>
+        <figure class="kfig kst"><img id="kSt" alt="Visuel story 9:16 de l'ebook"><figcaption><b>Story · 9:16</b><a class="btn" id="kStDl" href="#">Télécharger</a></figcaption></figure>
       </div>
       <section class="rsec kcopy">
         <div class="kcopyh"><h3>Description de vente</h3><button type="button" class="btn dl" id="kCopyDesc">Copier la description</button></div>
@@ -1104,8 +1105,8 @@ function kWatch(id){
     clearInterval(kTimer);kSetBusy(false);
     if(d.phase==='error'){kErr(d.error);return}
     const k=await (await fetch('/api/job/'+id+'/kit')).json(),c=k.copy||{},v=Date.now();
-    $('#kWide').src=`/api/job/${id}/kit/wide?v=${v}`;$('#kSq').src=`/api/job/${id}/kit/square?v=${v}`;
-    $('#kWideDl').href=`/api/job/${id}/kit/wide?dl=1`;$('#kSqDl').href=`/api/job/${id}/kit/square?dl=1`;
+    $('#kWide').src=`/api/job/${id}/kit/wide?v=${v}`;$('#kSq').src=`/api/job/${id}/kit/square?v=${v}`;$('#kSt').src=`/api/job/${id}/kit/story?v=${v}`;
+    $('#kWideDl').href=`/api/job/${id}/kit/wide?dl=1`;$('#kSqDl').href=`/api/job/${id}/kit/square?dl=1`;$('#kStDl').href=`/api/job/${id}/kit/story?dl=1`;
     $('#kZip').href=`/api/job/${id}/kit/zip?dl=1`;$('#kZip').setAttribute('aria-disabled','false');
     $('#kPTitle').value=c.titre_produit||k.title||'';$('#kDesc').value=c.description||'';$('#kHook').value=c.accroche||'';
     $('#kState').innerHTML=k.copy_error?`<div class="err">${esc(k.copy_error)}</div>`:'Kit prêt : tes visuels et ta description sont juste en dessous.';

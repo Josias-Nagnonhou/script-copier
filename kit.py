@@ -432,6 +432,78 @@ def square_visual(cover, out, pal, uni="moderne", pdf=None, n_pages=0):
     canvas.convert("RGB").save(out, "JPEG", quality=93, optimize=True)
 
 
+def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
+    """Visuel 9:16 (story TikTok / Instagram / Facebook) : accroche, scène produit, bénéfices, « lien dans la bio »."""
+    W, H = 1080, 1920
+    canvas = mesh_bg((W, H), pal, dark=True, seed=23)
+    pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
+    n = n_pages or n
+    d = ImageDraw.Draw(canvas)
+    acc, main = readable(rgb(pal["accent"])), rgb(pal["main"])
+    tc = (20, 20, 20) if sum(acc) > 380 else (255, 255, 255)
+    body, bold = BODY.get(uni, BODY["moderne"])
+    upper = uni == "impact"
+    # zone haute (sous la barre de la story) : étiquette + accroche
+    y = 230
+    label = (info.get("label") or "Nouvel ebook").upper()
+    lf = font(bold, 30)
+    lw = d.textlength(label, font=lf) + 56
+    d.rounded_rectangle([(W - lw) / 2, y, (W + lw) / 2, y + 60], radius=30, fill=acc)
+    d.text((W / 2, y + 30), label, font=lf, fill=tc, anchor="mm")
+    y += 96
+    hook = (info.get("hook") or info.get("title") or "").strip()
+    tf, lines, lh = fit_title(d, hook, DISPLAY.get(uni, DISPLAY["moderne"]), W - 150, 300, 96 if upper else 74, upper)
+    for ln in lines[:4]:
+        d.text((W / 2, y), ln, font=tf, fill=(255, 255, 255), anchor="ma"); y += lh
+    top_end = y
+    # scène produit
+    scene_cy = top_end + 395
+    _scene(canvas, cover, pages, best, W * .51, scene_cy, W * .76, pal, uni, n)
+    d = ImageDraw.Draw(canvas)
+    # bénéfices
+    y = scene_cy + W * .76 * .46
+    bf = font(bold, 36)
+    pts = (info.get("points") or [])[:3]
+    if pts:
+        widths = [min(W - 220, d.textlength(p, font=bf)) for p in pts]
+        x = int((W - (max(widths) + 56)) / 2)
+        for p in pts:
+            cy = y + 24
+            d.ellipse([x, cy - 19, x + 38, cy + 19], fill=acc)
+            d.line([(x + 10, cy), (x + 16, cy + 7), (x + 28, cy - 7)], fill=tc, width=5, joint="curve")
+            ln = wrap(d, p, bf, W - 220)[0]
+            d.text((x + 56, y + 2), ln, font=bf, fill=(255, 255, 255))
+            y += 62
+    # prix
+    if info.get("price"):
+        y += 18
+        pf = font("BebasNeue-Regular" if upper else DISPLAY.get(uni, "Poppins-ExtraBold"), 84 if upper else 64)
+        d.text((W / 2, y), info["price"], font=pf, fill=(255, 255, 255), anchor="ma")
+        y += 84 if upper else 78
+    # appel à l'action « lien dans la bio » (au-dessus de la zone des boutons de l'appli)
+    cy0 = max(y + 30, H - 500)
+    cta = "LIEN DANS LA BIO"
+    cf = font(bold, 46)
+    cw = d.textlength(cta, font=cf) + 200
+    x0, x1 = (W - cw) / 2, (W + cw) / 2
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rounded_rectangle([x0 - 10, cy0 - 10, x1 + 10, cy0 + 120], radius=70, fill=acc + (150,))
+    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(26)))
+    d = ImageDraw.Draw(canvas)
+    d.rounded_rectangle([x0, cy0, x1, cy0 + 110], radius=55, fill=(255, 255, 255))
+    ink = main if sum(main) < 520 else (20, 20, 20)
+    ax, ay = x0 + 66, cy0 + 55
+    dot = acc if sum(acc) < 600 else main
+    tc = (20, 20, 20) if sum(dot) > 380 else (255, 255, 255)
+    d.ellipse([ax - 34, ay - 34, ax + 34, ay + 34], fill=dot)
+    d.line([(ax, ay + 17), (ax, ay - 17)], fill=tc, width=6)
+    d.line([(ax - 13, ay - 4), (ax, ay - 18), (ax + 13, ay - 4)], fill=tc, width=6, joint="curve")
+    d.text((ax + 52, ay), cta, font=cf, fill=ink, anchor="lm")
+    sub = info.get("cta_sub") or "Clique et télécharge-le tout de suite"
+    d.text((W / 2, cy0 + 146), sub, font=font(body, 32), fill=(236, 234, 240), anchor="ma")
+    canvas.convert("RGB").save(out, "JPEG", quality=92, optimize=True)
+
+
 def cover_from_upload(path, out):
     """Image ou PDF importé → image de couverture JPEG."""
     if path.lower().endswith(".pdf"):

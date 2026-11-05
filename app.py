@@ -2096,13 +2096,21 @@ def run_kit_job(job, meta, cover_src, about):
         job["step"], job["pct"] = "Création du visuel carré…", 88
         square = os.path.join(d, f"{safe}_carre.jpg")
         KIT.square_visual(cover, square, pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
+        job["step"], job["pct"] = "Création du visuel story 9:16…", 94
+        story = os.path.join(d, f"{safe}_story_9x16.jpg")
+        hook = (copy.get("accroche") or "").strip()
+        KIT.story_visual(cover, story, {"hook": hook if 8 < len(hook) <= 95 else (meta.get("title") or ""),
+                                        "title": meta.get("title") or "", "points": points, "price": meta.get("price") or "",
+                                        "label": meta.get("label") or "Ebook PDF"},
+                         pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
         zp = os.path.join(d, f"{safe}_kit.zip")
         with zipfile.ZipFile(zp, "w", zipfile.ZIP_STORED) as z:
             z.write(wide, os.path.basename(wide)); z.write(square, os.path.basename(square))
+            z.write(story, os.path.basename(story))
             if copy.get("description"):
                 z.writestr(f"{safe}_description.txt", (copy.get("titre_produit", "") + "\n\n" + copy["description"]
                                                        + ("\n\n" + copy["accroche"] if copy.get("accroche") else "")).encode("utf-8"))
-        job.update(kit={"wide": wide, "square": square, "zip": zp}, copy=copy)
+        job.update(kit={"wide": wide, "square": square, "story": story, "zip": zp}, copy=copy)
         job["phase"], job["pct"], job["step"] = "done", 100, "Kit prêt"
         print(f"[kit {job['id']}] terminé (description : {'oui' if copy.get('description') else 'non'})", flush=True)
     except Exception as e:

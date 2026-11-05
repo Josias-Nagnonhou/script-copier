@@ -359,7 +359,7 @@ def gen_plan(chat, ctx, pages):
             "\"ce_que_tu_vas_obtenir\": [\"5 bénéfices concrets\"], \"avertissement\": \"une phrase si le sujet touche à la santé, l'argent, le droit ou la religion, sinon vide\", "
             f"\"chapitres\": [{{\"titre\": \"\", \"objectif\": \"ce que le lecteur saura faire après\", \"sections\": [\"" + str(n_sec) + " titres de parties\"], "
             "\"image_prompt\": \"description en ANGLAIS d'une illustration pour ce chapitre (scène concrète, sans texte)\", "
-            "\"photo_query\": \"3 à 5 mots-clés en ANGLAIS pour trouver une vraie photo dans une banque d'images (ex. : african woman praying sunrise) ; ajoute african si des personnes apparaissent\"}}], "
+            "\"photo_query\": \"3 à 5 mots-clés en ANGLAIS pour trouver une vraie photo dans une banque d'images (ex. : african woman praying sunrise) ; ajoute african si des personnes apparaissent ; jamais le nom d'une personne célèbre : une scène, un lieu ou un objet réel\"}}], "
             "\"bonus\": {\"titre\": \"\", \"type\": \"checklist, plan sur 7 jours, fiches pratiques ou tableau de suivi\"}}\n"
             f"Il faut exactement {n_ch} chapitres, dans un ordre logique du plus simple au plus avancé. "
             "Direction artistique : choisis l'univers qui colle le mieux au sujet et à l'émotion recherchée, et invente une "
@@ -573,6 +573,43 @@ def fetch_pixabay(query, path, key, used, log=print, orientation="horizontal"):
                 im.save(path, "JPEG", quality=90)
                 used.add(("pb", ph["id"]))
                 return {"name": ph.get("user", ""), "url": ph.get("pageURL", ""), "src": "Pixabay"}
+            except Exception:
+                continue
+    return None
+
+
+def fetch_openverse(query, path, used, log=print, orientation="landscape"):
+    """Vraie photo d'Internet sous licence libre autorisant l'usage commercial (Wikimedia, Flickr…), via Openverse."""
+    q = re.sub(r"[^\w\s-]", " ", clean(query))[:90].strip()
+    tries = [q] + ([" ".join(q.split()[:3])] if len(q.split()) > 3 else []) + ([" ".join(q.split()[:2])] if len(q.split()) > 2 else [])
+    for qq in tries:
+        try:
+            r = requests.get("https://api.openverse.org/v1/images/", timeout=40,
+                             headers={"User-Agent": "Kopi-ebook/1.0"},
+                             params={"q": qq, "license_type": "commercial,modification", "page_size": 20, "mature": "false",
+                                     "aspect_ratio": "wide" if orientation == "landscape" else "tall", "size": "large"})
+        except Exception as e:
+            log(f"[ebook] Openverse : {type(e).__name__}"); return None
+        if r.status_code == 429:
+            log("[ebook] Openverse : trop de demandes, pause"); time.sleep(20); continue
+        if r.status_code != 200:
+            log(f"[ebook] Openverse {r.status_code} {r.text[:100]}"); continue
+        for ph in r.json().get("results") or []:
+            if ("ov", ph.get("id")) in used or (ph.get("width") or 0) < 1000:
+                continue
+            try:
+                img = requests.get(ph["url"], timeout=60, headers={"User-Agent": "Kopi-ebook/1.0"})
+                im = Image.open(io.BytesIO(img.content)).convert("RGB")
+                if im.width < 900:
+                    continue
+                im.thumbnail((2000, 2000))
+                im.save(path, "JPEG", quality=90)
+                used.add(("ov", ph.get("id")))
+                lic = (ph.get("license") or "").upper()
+                lic = "domaine public" if lic in ("CC0", "PDM") else f"CC {lic} {ph.get('license_version') or ''}".strip()
+                return {"name": ph.get("creator") or "auteur inconnu", "url": ph.get("foreign_landing_url") or "",
+                        "src": "Openverse", "title": ph.get("title") or "", "license": lic,
+                        "provider": (ph.get("source") or "").replace("_", " ").title()}
             except Exception:
                 continue
     return None
@@ -1250,10 +1287,15 @@ def build_pdf(book, path):
     credits = [c for c in book.get("credits") or [] if c.get("name")]
     if credits:
         bits = []
-        for srcname in dict.fromkeys(c.get("src", "Pexels") for c in credits):
+        for srcname in dict.fromkeys(c.get("src", "Pexels") for c in credits if c.get("src") != "Openverse"):
             names = ", ".join(dict.fromkeys(plain(c["name"]) for c in credits if c.get("src", "Pexels") == srcname))
             bits.append(f"{srcname} ({names})")
-        story += [Spacer(1, .6 * cm), Paragraph(inline("Crédits photos : photos fournies par " + " et ".join(bits) + "."),
+        libres = [c for c in credits if c.get("src") == "Openverse"]
+        for c in libres:
+            t = f"« {plain(c['title'])[:70]} »" if c.get("title") else "Photo"
+            bits.append(f"{t} par {plain(c['name'])[:60]}, {c.get('license', '')}" + (f", via {c['provider']}" if c.get("provider") else "")
+                        + (f" ({c['url']})" if c.get("url") else ""))
+        story += [Spacer(1, .6 * cm), Paragraph(inline("Crédits photos : " + ("photos fournies par " if not libres else "") + " ; ".join(bits) + "."),
                                                 ParagraphStyle("cred", parent=st["body"], fontSize=8, leading=11.5, textColor=MUTED))]
     others = [o for o in book.get("autres_produits") or [] if o.get("nom")]
     if others or book.get("boutique"):

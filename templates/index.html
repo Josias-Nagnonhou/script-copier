@@ -460,14 +460,15 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           <label class="acheck"><input type="checkbox" id="ebImg" checked> <span><b>Images</b> · couverture créée sur mesure par l'IA de Google, et une image par chapitre, avec des personnes africaines.</span></label>
           <div class="imgsrc">
             <span class="pill {{ '' if gemini else 'off' }}"><i></i>IA Google {{ 'connectée' if gemini else 'non connectée' }}</span>
-            <span class="pill {{ '' if pexels else 'off' }}"><i></i>Photos gratuites {{ 'connectées' if pexels else 'non connectées' }}</span>
+            <span class="pill"><i></i>Photos d'Internet sous licence libre</span>
           </div>
           <label for="ebChapImg" style="margin-top:12px">Images des chapitres</label>
           <select id="ebChapImg">
-            <option value="photo">Vraies photos gratuites (Pixabay)</option>
+            <option value="web" selected>Vraies photos d'Internet sous licence libre (gratuit)</option>
+            <option value="photo" {{ '' if pexels else 'disabled' }}>Photos de banque d'images Pixabay (gratuit{{ '' if pexels else ', clé à ajouter' }})</option>
             <option value="google" {{ '' if gemini else 'disabled' }}>IA Google sur mesure (≈ 0,03 $ par image)</option>
           </select>
-          {% if not gemini or not pexels %}<p class="hint">{{ 'La clé Google n\'est pas encore détectée. ' if not gemini else '' }}{{ 'Pour les photos gratuites, ajoute ta clé Pixabay dans Render (Claude te guide). ' if not pexels else '' }}En attendant, Kopi utilise le service gratuit, de qualité moyenne.</p>{% endif %}
+          <p class="hint">Les vraies photos viennent de Wikimedia, Flickr et d'autres sites dont les auteurs autorisent l'usage commercial. Kopi crédite chaque auteur en fin de livre. Pas de photos de célébrités : des scènes, des lieux et des objets réels.</p>
         </div>
       </div>
       <button class="go" id="ebGo">Créer l'ebook →</button>
@@ -1029,7 +1030,7 @@ function ebWatch(id){
     $('#ebProg').hidden=true;$('#ebDone').hidden=false;
     $('#ebCover').src='/api/job/'+id+'/ebook/cover';
     $('#ebDoneTitle').textContent=info.title||'';
-    const src=info.img_sources||{},parts=[];if(src.google)parts.push(src.google>1?`${src.google} images IA Google`:'couverture IA Google');if(src.pexels)parts.push(`${src.pexels} photo${src.pexels>1?'s':''} Pexels`);if(src.pixabay)parts.push(`${src.pixabay} photo${src.pixabay>1?'s':''} Pixabay`);if(src.libre)parts.push(`${src.libre} image${src.libre>1?'s':''} IA gratuite${src.libre>1?'s':''}`);
+    const src=info.img_sources||{},parts=[];if(src.google)parts.push(src.google>1?`${src.google} images IA Google`:'couverture IA Google');if(src.pexels)parts.push(`${src.pexels} photo${src.pexels>1?'s':''} Pexels`);if(src.pixabay)parts.push(`${src.pixabay} photo${src.pixabay>1?'s':''} Pixabay`);if(src.web)parts.push(`${src.web} vraie${src.web>1?'s':''} photo${src.web>1?'s':''} d'Internet`);if(src.libre)parts.push(`${src.libre} image${src.libre>1?'s':''} IA gratuite${src.libre>1?'s':''}`);
     $('#ebDoneMeta').textContent=`${info.pages||'?'} pages · ${(info.toc||[]).length} chapitres`+(info.univers?` · univers ${info.univers}`:'')+(info.images?(parts.length?' · '+parts.join(', '):' · sans images (services indisponibles)'):'');
     $('#ebToc').innerHTML=(info.toc||[]).map(t=>`<li>${esc(t)}</li>`).join('');
     $('#ebPdf').href='/api/job/'+id+'/ebook/pdf';$('#ebDocx').href='/api/job/'+id+'/ebook/docx';

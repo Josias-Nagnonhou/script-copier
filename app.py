@@ -1607,7 +1607,7 @@ def run_ebook_job(job, ctx):
         cw, chh = EB.cover_size(uni)
         imgs_ok = 0
         credits, used = [], set()
-        src_count = {"google": 0, "pexels": 0, "pixabay": 0, "libre": 0}
+        src_count = {"google": 0, "pexels": 0, "pixabay": 0, "web": 0, "libre": 0}
         if job["images"]:
             job["step"] = "Création de la couverture…"
             cprompt = plan.get("cover_prompt") or ctx["title"]
@@ -1630,15 +1630,20 @@ def run_ebook_job(job, ctx):
                 if job.get("chapter_images") == "google" and GEMINI_KEY:
                     if EB.fetch_gemini(c.get("image_prompt") or c["titre"], 1280, ih, pth, GEMINI_KEY, log=print, uni=uni, size="1K"):
                         src_count["google"] += 1; ok = True
-                if not ok and PIXABAY_KEY:
-                    cr = EB.fetch_pixabay(q, pth, PIXABAY_KEY, used, log=print)
+                order = ["web", "pixabay", "pexels"] if job.get("chapter_images") == "web" else ["pixabay", "pexels", "web"]
+                for prov in order:
+                    if ok:
+                        break
+                    cr = None
+                    if prov == "web":
+                        cr = EB.fetch_openverse(q, pth, used, log=print)
+                    elif prov == "pixabay" and PIXABAY_KEY:
+                        cr = EB.fetch_pixabay(q, pth, PIXABAY_KEY, used, log=print)
+                    elif prov == "pexels" and PEXELS_KEY:
+                        cr = EB.fetch_pexels(q, pth, PEXELS_KEY, used, log=print)
                     if cr:
-                        credits.append(cr); src_count["pixabay"] += 1; ok = True
-                if not ok and PEXELS_KEY:
-                    cr = EB.fetch_pexels(q, pth, PEXELS_KEY, used, log=print)
-                    if cr:
-                        credits.append(cr); src_count["pexels"] += 1; ok = True
-                if not ok and not (PIXABAY_KEY or PEXELS_KEY) and job.get("chapter_images") != "google" and \
+                        credits.append(cr); src_count[{"web": "web"}.get(prov, prov)] += 1; ok = True
+                if not ok and job.get("chapter_images") != "google" and \
                         EB.fetch_image(c.get("image_prompt") or c["titre"], 1280, ih, seed + k + 1, pth, log=print, uni=uni):
                     src_count["libre"] += 1; ok = True
                 c["img"] = pth if ok else None  # pas de visuel de remplissage : ouverture sobre sans image
@@ -1729,7 +1734,7 @@ def start_ebook():
     job = {"id": uuid.uuid4().hex[:12], "platform": "ebook", "source": title, "url": "", "limit": 0, "sort": "",
            "lang": "", "phase": "queued", "items": [], "source_name": title, "error": "", "created": time.time(),
            "pages": pages, "images": bool(d.get("images", True)), "step": "En attente…", "pct": 0,
-           "chapter_images": "google" if d.get("chapter_images") == "google" else "photo"}
+           "chapter_images": d.get("chapter_images") if d.get("chapter_images") in ("google", "web", "photo") else "web"}
     job["ctx"] = ctx
     with LOCK:
         JOBS[job["id"]] = job

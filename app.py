@@ -1114,6 +1114,11 @@ GOOD_MODEL = {"name": None}
 
 
 def groq_chat(messages, max_tokens=6000, json_mode=False, tag="traduction"):
+    if GEMINI_KEY and time.time() < GROQ_OUT["until"]:
+        try:
+            return gemini_chat(messages, max_tokens, json_mode, tag)
+        except Exception as e:
+            print(f"[{tag}] Gemini en échec, nouvel essai Groq : {str(e)[:100]}", flush=True)
     models = ([GOOD_MODEL["name"]] if GOOD_MODEL["name"] else []) + [m for m in CHAT_MODELS if m != GOOD_MODEL["name"]]
     last = ""
     for model in models:
@@ -1154,10 +1159,71 @@ def groq_chat(messages, max_tokens=6000, json_mode=False, tag="traduction"):
             print(f"[{tag}] modèle refusé {last}", flush=True)
             break  # modèle indisponible ou requête trop grosse : on essaie le suivant
         else:
-            raise RuntimeError("Limite Groq atteinte, réessaie dans quelques minutes.")
+            last = last if "limite du jour" in last else f"{model} : limite par minute"
+            print(f"[{tag}] {model} : limite par minute toujours active, modèle suivant", flush=True)
+    if "limite du jour" in last:
+        GROQ_OUT["until"] = time.time() + 3600  # on laisse Groq se recharger une heure
+    if GEMINI_KEY:
+        print(f"[{tag}] Groq indisponible ({last[:80]}) : relais par Gemini", flush=True)
+        return gemini_chat(messages, max_tokens, json_mode, tag)
     if "limite du jour" in last:
         raise RuntimeError("Limite Groq du jour atteinte sur tous les modèles. Réessaie dans quelques heures.")
     raise RuntimeError(f"Aucun modèle d'IA disponible chez Groq ({last}).")
+
+
+GROQ_OUT = {"until": 0}
+GEMINI_TEXT_MODELS = [m.strip() for m in os.environ.get(
+    "GEMINI_TEXT_MODELS", "gemini-flash-latest,gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite,gemini-2.5-flash").split(",") if m.strip()]
+GOOD_GEMINI = {"name": None}
+
+
+def gemini_chat(messages, max_tokens=6000, json_mode=False, tag="ia"):
+    """Relais Google Gemini (clé GOOGLE) quand Groq a atteint sa limite."""
+    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+    contents = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+                for m in messages if m["role"] != "system"]
+    models = ([GOOD_GEMINI["name"]] if GOOD_GEMINI["name"] else []) + [m for m in GEMINI_TEXT_MODELS if m != GOOD_GEMINI["name"]]
+    last = ""
+    for model in models:
+        cfg = {"temperature": 0.4 if json_mode else 0.6, "maxOutputTokens": int(max_tokens * 2) + 2048,
+               "thinkingConfig": {"thinkingLevel": "low"}}
+        if json_mode:
+            cfg["responseMimeType"] = "application/json"
+        body = {"contents": contents, "generationConfig": cfg}
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
+        for attempt in range(5):
+            try:
+                r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                                  headers={"x-goog-api-key": GEMINI_KEY}, json=body, timeout=240)
+            except requests.RequestException as e:
+                last = f"{model} : {e}"; time.sleep(5); continue
+            if r.status_code == 200:
+                try:
+                    parts = r.json()["candidates"][0]["content"]["parts"]
+                    txt = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+                except (KeyError, IndexError, ValueError):
+                    txt = ""
+                if txt:
+                    if GOOD_GEMINI["name"] != model:
+                        print(f"[{tag}] Gemini : modèle {model}", flush=True)
+                    GOOD_GEMINI["name"] = model
+                    return txt
+                last = f"{model} : réponse vide {r.text[:120]}"
+                break
+            if r.status_code == 400 and "thinking" in r.text.lower() and "thinkingConfig" in cfg:
+                cfg.pop("thinkingConfig"); continue
+            if r.status_code in (429, 500, 503):
+                per_day = "per day" in r.text.lower() or "perday" in r.text.lower()
+                if r.status_code == 429 and per_day:
+                    last = f"{model} : limite du jour"; break
+                time.sleep(min(60, 8 * (attempt + 1))); last = f"{model} : {r.status_code}"; continue
+            last = f"{model} : {r.status_code} {r.text[:160]}"
+            print(f"[{tag}] Gemini refusé {last}", flush=True)
+            if GOOD_GEMINI["name"] == model:
+                GOOD_GEMINI["name"] = None
+            break
+    raise RuntimeError("Limite atteinte chez Groq et chez Google Gemini. Réessaie dans quelques heures.")
 
 
 def chunk_text(text, size=2500):
@@ -1963,20 +2029,35 @@ def gen_sales_copy(meta, about=""):
     if about:
         facts.append(f"Contenu du livre (extrait ou résumé) : {about[:4000]}")
     facts = [f for f in facts if f.split(":", 1)[1].strip()]
-    system = ("Tu es un copywriter francophone spécialiste de la vente de produits digitaux en Afrique francophone "
-              "et dans la diaspora (boutiques en ligne type Chariow). Tu écris des descriptions qui donnent envie "
-              "d'acheter tout en restant honnêtes : pas de faux témoignages, pas de chiffres inventés, pas de "
-              "promesse de résultat garanti, pas de fausse urgence. Tutoiement, phrases courtes, ton chaleureux et sûr.")
-    user = ("Écris la page de vente de cet ebook.\n" + "\n".join(facts) + "\n\n"
+    system = ("Tu es un copywriter francophone haut de gamme, spécialiste de la vente de produits digitaux en Afrique "
+              "francophone et dans la diaspora (boutiques en ligne type Chariow, Selar, WhatsApp). Tu maîtrises les "
+              "structures qui convertissent (PAS, AIDA, storytelling) et tu écris comme on parle à un ami qu'on veut aider. "
+              "Tu restes honnête : pas de faux témoignages, pas de chiffres ni de résultats inventés, pas de garantie de "
+              "résultat, pas de fausse urgence ni de faux stock limité, pas de promesse de remboursement si on ne te l'a pas "
+              "donnée. Tutoiement, phrases courtes et rythmées, images concrètes du quotidien africain, ton chaleureux, sûr et "
+              "émotionnel. Tu n'inventes aucun contenu du livre : tu t'appuies sur les chapitres et bénéfices fournis.")
+    user = ("Écris la page de vente complète de cet ebook.\n" + "\n".join(facts) + "\n\n"
             "Réponds UNIQUEMENT en JSON : {\"titre_produit\": \"titre de la fiche produit (max 80 caractères)\", "
             "\"accroche\": \"1 phrase choc pour les réseaux sociaux\", "
             "\"points_forts\": [\"3 bénéfices très courts (max 42 caractères chacun) pour le visuel\"], "
-            "\"description\": \"la description complète, 180 à 260 mots, en texte brut prêt à coller : une accroche qui parle "
-            "du problème du lecteur, ce que le livre va changer pour lui, une liste « Dans ce guide, tu vas découvrir : » "
-            "de 5 ou 6 points commençant par ✅, pour qui il est fait, ce qu'il reçoit (format PDF, nombre de pages si connu), "
-            "et un appel à l'action final. Sauts de ligne entre les parties. 4 émojis maximum en dehors des ✅.\"}")
+            "\"description\": \"la description LONGUE, entre 650 et 900 mots, en texte brut prêt à coller, avec des sauts de "
+            "ligne entre les paragraphes et des titres de partie en MAJUSCULES précédés d'un émoji. Structure obligatoire : "
+            "1) une accroche forte en 1 ou 2 phrases qui touche directement la douleur ou le désir du lecteur ; "
+            "2) « Est-ce que tu te reconnais ? » : 4 ou 5 situations vécues, une par ligne, commençant par 👉 ; "
+            "3) l'agitation : ce que ça coûte de rester comme ça (argent, temps, relations, paix intérieure), en 2 courts paragraphes ; "
+            "4) le déclic : présente le livre comme la solution, ce qui le rend différent ; "
+            "5) « CE QUE TU VAS DÉCOUVRIR » : 7 à 9 points commençant par ✅, chacun formulé comme un bénéfice concret "
+            "tiré des chapitres (pas juste le titre du chapitre) ; "
+            "6) « CE LIVRE EST POUR TOI SI… » (3 ou 4 lignes) puis « IL N'EST PAS POUR TOI SI… » (2 lignes, honnête) ; "
+            "7) « CE QUE TU REÇOIS » : format PDF lisible sur téléphone, tablette et ordinateur, nombre de pages si connu, "
+            "accès immédiat après paiement, bonus si le livre en contient ; "
+            "8) « TU TE DEMANDES PEUT-ÊTRE… » : 3 questions-réponses courtes qui lèvent les objections (prix, temps, "
+            "« est-ce que ça marchera pour moi ») sans rien promettre de garanti ; "
+            "9) la projection : imagine ta vie dans quelques semaines en appliquant ce que tu as appris (sans chiffre inventé) ; "
+            "10) un appel à l'action final puissant, avec le prix s'il est connu, qui invite à cliquer sur Acheter maintenant. "
+            "Varie la longueur des phrases. Émojis seulement en début de ligne de liste et de titre de partie.\"}")
     raw = groq_chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
-                    max_tokens=2500, json_mode=True, tag="kit")
+                    max_tokens=6000, json_mode=True, tag="kit")
     out = parse_json_loose(raw)
     out["points_forts"] = [p.strip()[:48] for p in (out.get("points_forts") or []) if isinstance(p, str) and p.strip()][:3]
     out["description"] = (out.get("description") or "").replace("\\n", "\n").strip()

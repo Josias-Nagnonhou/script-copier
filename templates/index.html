@@ -212,6 +212,12 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .kcopyh h3{margin:0}.kcopyh .btn{min-width:200px}
 .kline{display:flex;gap:8px}.kline input{flex:1;min-width:0}.kline .btn{flex:none;padding:10px 16px}
 .kdesc{min-height:330px;font-size:15px;line-height:1.65}
+.ttlrow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.ttlseg{margin:0}.ttlseg button{padding:8px 13px;font-size:13px}
+.ttlrow .linkbtn{margin:0}
+.ttlsugg{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:10px}
+.tsug{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:9px 13px;font:700 14px var(--body);cursor:pointer;text-align:left;max-width:100%}
+.tsug:hover{border-color:var(--ink)}.tsug.on{background:var(--ink);color:var(--on-ink);border-color:var(--ink)}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px;margin:-8px 0 26px;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
 .modes::-webkit-scrollbar{display:none}
@@ -421,8 +427,16 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
       <p class="ytlead">L'IA écrit le livre en entier à partir de ce qu'elle a appris sur ton audience, puis choisit pour lui un design unique selon le sujet : couleurs, polices, couverture et mise en page (Moderne, Impact, Sacré, Luxe, Doux ou Éditorial).</p>
       <div class="ebgrid">
         <div class="ebcol">
-          <label for="ebTitle">Titre ou sujet du livre</label>
+          <label for="ebTitle">Titre du livre</label>
           <input id="ebTitle" class="bigin" autocomplete="off">
+          <div class="ttlrow">
+            <div class="seg ttlseg" id="ebKeep" role="radiogroup" aria-label="Titre">
+              <button type="button" data-k="1" class="on" role="radio" aria-checked="true">Garder exactement ce titre</button>
+              <button type="button" data-k="0" role="radio" aria-checked="false">Laisser l'IA l'améliorer</button>
+            </div>
+            <button type="button" class="linkbtn" id="ebSuggest">Proposer d'autres titres</button>
+          </div>
+          <div class="ttlsugg" id="ebSugg" hidden></div>
           <label for="ebBrief" style="margin-top:12px">Consignes pour l'IA <small class="opt">(facultatif)</small></label>
           <textarea id="ebBrief" rows="3" placeholder="Ex. : insiste sur les prières du matin, ajoute des témoignages, ton très bienveillant…"></textarea>
           <div class="num">
@@ -932,13 +946,29 @@ function aShowSaved(){try{const s=localStorage.getItem('auReport');if(s){aRender
 try{const j=localStorage.getItem('auJob');if(j)aWatch(j);else aShowSaved()}catch(e){}
 
 /* ---------- créateur d'ebook ---------- */
-let ebTimer=null,ebBusy=false,ebProduct=null;
+let ebTimer=null,ebBusy=false,ebProduct=null,ebKeep=true;
+document.querySelectorAll('#ebKeep button').forEach(b=>b.onclick=()=>{ebKeep=b.dataset.k==='1';
+  document.querySelectorAll('#ebKeep button').forEach(x=>{const on=x===b;x.classList.toggle('on',on);x.setAttribute('aria-checked',String(on))})});
+$('#ebSuggest').onclick=async()=>{
+  const title=$('#ebTitle').value.trim();if(!title){$('#ebTitle').focus();return}
+  const r=(aCur&&aCur.report)||{},box=$('#ebSugg');
+  box.hidden=false;box.innerHTML='<span class="muted">L\'IA cherche des titres…</span>';$('#ebSuggest').disabled=true;
+  try{const res=await fetch('/api/ebook/titles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,product:ebProduct||{},audience:r.audience||{},
+      niche:(r.niche||{}).principale||'',douleurs:L(r.douleurs).map(x=>x.probleme),desirs:L(r.desirs).map(x=>x.desir)})});
+    const d=await res.json();if(!res.ok)throw new Error(d.error||'Erreur');
+    box.innerHTML='<small class="muted">Clique sur un titre pour le choisir :</small>'+d.titles.map(t=>`<button type="button" class="tsug">${esc(t)}</button>`).join('');
+  }catch(e){box.innerHTML=`<span class="err">${esc(e.message)}</span>`}
+  $('#ebSuggest').disabled=false;
+};
+$('#ebSugg').addEventListener('click',e=>{const b=e.target.closest('.tsug');if(!b)return;$('#ebTitle').value=b.textContent;
+  document.querySelectorAll('.tsug').forEach(x=>x.classList.toggle('on',x===b));
+  ebKeep=true;document.querySelectorAll('#ebKeep button').forEach(x=>{const on=x.dataset.k==='1';x.classList.toggle('on',on);x.setAttribute('aria-checked',String(on))})});
 try{$('#ebAuthor').value=localStorage.getItem('ebAuthor')||'';$('#ebShop').value=localStorage.getItem('ebShop')||''}catch(e){}
 document.querySelectorAll('#ebChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#ebChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#ebPages').value=b.dataset.v;$('#ebPagesErr').hidden=true});
 $('#ebPages').oninput=()=>{$('#ebPagesErr').hidden=true;document.querySelectorAll('#ebChips button').forEach(x=>x.classList.toggle('on',x.dataset.v===$('#ebPages').value))};
 function ebOpen(prod){
   ebProduct=prod||null;
-  $('#ebTitle').value=prod?prod.nom||'':'';$('#ebBrief').value='';
+  $('#ebTitle').value=prod?prod.nom||'':'';$('#ebBrief').value='';$('#ebSugg').hidden=true;$('#ebSugg').innerHTML='';
   $('#ebPanel').hidden=false;if(!ebBusy){$('#ebDone').hidden=true;$('#ebProg').hidden=true}
   $('#ebPanel').scrollIntoView({behavior:'smooth',block:'start'});setTimeout(()=>$('#ebTitle').focus(),400);
 }
@@ -956,7 +986,7 @@ $('#ebGo').onclick=async()=>{
   const author=$('#ebAuthor').value.trim(),shop=$('#ebShop').value.trim();
   try{localStorage.setItem('ebAuthor',author);localStorage.setItem('ebShop',shop)}catch(e){}
   const r=(aCur&&aCur.report)||{};
-  const body={title,pages,author,shop,images:$('#ebImg').checked,brief:$('#ebBrief').value.trim(),
+  const body={title,pages,author,shop,images:$('#ebImg').checked,brief:$('#ebBrief').value.trim(),keep_title:ebKeep,
     product:ebProduct||{},audience:r.audience||{},niche:(r.niche||{}).principale||'',
     douleurs:L(r.douleurs).map(x=>x.probleme),desirs:L(r.desirs).map(x=>x.desir),
     others:L(r.produits).map(x=>({nom:x.nom,promesse:x.promesse}))};

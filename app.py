@@ -1530,6 +1530,8 @@ def run_ebook_job(job, ctx):
             raise RuntimeError("Le plan proposé par l'IA est incomplet. Relance la création.")
         plan["chapitres"] = chs
         job["toc"] = [c["titre"] for c in chs]
+        if ctx.get("keep_title"):
+            plan["titre"] = ctx["title"]  # le titre choisi par l'auteur est conservé tel quel
         job["book_title"] = plan.get("titre") or ctx["title"]
         total = job["pages"] * 230
         w_intro, w_bonus, w_concl = 380, max(300, min(700, total // 12)), 300
@@ -1648,7 +1650,7 @@ def start_ebook():
     ctx = {"title": title, "product": d.get("product") or {}, "audience": d.get("audience") or {},
            "niche": keep(d.get("niche"), 200), "douleurs": [keep(x, 200) for x in (d.get("douleurs") or [])][:6],
            "desirs": [keep(x, 200) for x in (d.get("desirs") or [])][:6], "brief": keep(d.get("brief"), 800),
-           "author": keep(d.get("author"), 60), "shop": keep(d.get("shop"), 200),
+           "author": keep(d.get("author"), 60), "shop": keep(d.get("shop"), 200), "keep_title": bool(d.get("keep_title", True)),
            "others": [{"nom": keep(o.get("nom"), 120), "promesse": keep(o.get("promesse"), 200)}
                       for o in (d.get("others") or []) if isinstance(o, dict)][:6]}
     job = {"id": uuid.uuid4().hex[:12], "platform": "ebook", "source": title, "url": "", "limit": 0, "sort": "",
@@ -1658,6 +1660,32 @@ def start_ebook():
         JOBS[job["id"]] = job
     threading.Thread(target=run_ebook_job, args=(job, ctx), daemon=True).start()
     return jsonify(job_id=job["id"])
+
+
+@app.post("/api/ebook/titles")
+def ebook_titles():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not GROQ_KEY:
+        return jsonify(error="La clé Groq n'est pas configurée."), 400
+    d = request.get_json(force=True) or {}
+    title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()[:120]
+    if not title:
+        return jsonify(error="Écris d'abord un titre ou un sujet."), 400
+    ctx = {"title": title, "product": d.get("product") or {}, "audience": d.get("audience") or {},
+           "niche": (d.get("niche") or "")[:200] if isinstance(d.get("niche"), str) else "",
+           "douleurs": [str(x)[:200] for x in (d.get("douleurs") or [])][:6],
+           "desirs": [str(x)[:200] for x in (d.get("desirs") or [])][:6]}
+    try:
+        raw = EB.gen_titles(lambda m, **k: groq_chat(m, tag="titres", **k), ctx)
+        titles = [re.sub(r"\s+", " ", str(t)).strip(" «»\"")[:90] for t in (parse_json_loose(raw).get("titres") or [])]
+        titles = [t for t in titles if t][:6]
+        if not titles:
+            raise ValueError("vide")
+        return jsonify(titles=titles)
+    except Exception as e:
+        print(f"[titres] erreur : {str(e)[:160]}", flush=True)
+        return jsonify(error="L'IA n'a pas pu proposer de titres. Réessaie dans un instant."), 502
 
 
 @app.get("/api/job/<jid>/ebook")

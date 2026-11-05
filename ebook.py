@@ -272,7 +272,10 @@ def gen_plan(chat, ctx, pages):
     n_ch = max(4, min(12, round(pages / 5.5)))
     system = ("Tu es un éditeur expert en ebooks qui se vendent bien auprès des audiences francophones africaines "
               "et de la diaspora. Tu conçois des guides pratiques qui tiennent leur promesse. " + STYLE_RULES)
-    user = (f"Conçois le plan d'un ebook de {pages} pages environ, intitulé provisoirement « {ctx['title']} ».\n"
+    title_rule = (f"Le titre est IMPOSÉ par l'auteur : « {ctx['title']} ». Mets exactement ce titre dans « titre », sans le modifier, "
+                  "et construis le sous-titre et le contenu autour de lui.\n") if ctx.get("keep_title") else \
+        f"Titre provisoire : « {ctx['title']} » (tu peux l'améliorer pour qu'il vende mieux).\n"
+    user = (f"Conçois le plan d'un ebook de {pages} pages environ.\n{title_rule}"
             f"{make_context(ctx)}\n\n"
             f"Réponds UNIQUEMENT avec un objet JSON valide :\n"
             "{\"titre\": \"titre accrocheur et clair (max 70 caractères)\", \"sous_titre\": \"promesse concrète (max 110 caractères)\", "
@@ -292,6 +295,18 @@ def gen_plan(chat, ctx, pages):
             "ne représente jamais Dieu, un prophète ou une figure sacrée (préfère des scènes symboliques : lumière, mains, nature).")
     from_json = chat([{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=3500, json_mode=True)
     return from_json, n_ch
+
+
+def gen_titles(chat, ctx, n=5):
+    """Propose des titres d'ebook accrocheurs pour cette audience."""
+    user = (f"Propose {n} titres d'ebook différents et accrocheurs (max 60 caractères chacun) pour ce produit : "
+            f"« {ctx['title']} ».\n{make_context(ctx)}\n"
+            "Varie les angles : bénéfice concret, chiffre ou durée, question, promesse rassurante, mot fort. "
+            "Pas de promesse mensongère. Réponds UNIQUEMENT en JSON : {\"titres\": [\"\"]}")
+    raw = chat([{"role": "system", "content": "Tu es un expert en titres de livres qui se vendent auprès des audiences "
+                 "francophones africaines et de la diaspora."}, {"role": "user", "content": user}],
+               max_tokens=800, json_mode=True)
+    return raw
 
 
 def gen_section(chat, plan, ctx, kind, words, idx=None, prev=""):

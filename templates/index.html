@@ -219,6 +219,8 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .tsug{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:9px 13px;font:700 14px var(--body);cursor:pointer;text-align:left;max-width:100%}
 .tsug:hover{border-color:var(--ink)}.tsug.on{background:var(--ink);color:var(--on-ink);border-color:var(--ink)}
 .ebresume{display:inline-block;margin-top:8px;padding:10px 16px}
+.imgsrc{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0 28px}
+.imgsrc .pill{font-size:12px;padding:5px 10px}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px;margin:-8px 0 26px;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
 .modes::-webkit-scrollbar{display:none}
@@ -455,7 +457,12 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           <input id="ebAuthor" autocomplete="off" placeholder="Ton nom ou celui de ta chaîne">
           <label for="ebShop" style="margin-top:12px">Lien de ta boutique <small class="opt">(facultatif)</small></label>
           <input id="ebShop" inputmode="url" autocomplete="off" placeholder="https://… (affiché en fin de livre)">
-          <label class="acheck"><input type="checkbox" id="ebImg" checked> <span><b>Illustrations par IA</b> · une couverture et une image par chapitre, avec des personnages africains, sans texte. Sinon, visuels graphiques aux couleurs du livre.</span></label>
+          <label class="acheck"><input type="checkbox" id="ebImg" checked> <span><b>Images</b> · couverture créée sur mesure par l'IA de Google, et une vraie photo professionnelle (Pexels) par chapitre, avec des personnes africaines.</span></label>
+          <div class="imgsrc">
+            <span class="pill {{ '' if gemini else 'off' }}"><i></i>Couverture IA Google {{ 'connectée' if gemini else 'non connectée' }}</span>
+            <span class="pill {{ '' if pexels else 'off' }}"><i></i>Photos Pexels {{ 'connectées' if pexels else 'non connectées' }}</span>
+          </div>
+          {% if not gemini or not pexels %}<p class="hint">Pour activer {{ 'les deux services' if not gemini and not pexels else ('la couverture Google' if not gemini else 'les photos Pexels') }}, ajoute la clé dans Render (Claude te guide). En attendant, Kopi utilise le service gratuit, de qualité moyenne.</p>{% endif %}
         </div>
       </div>
       <button class="go" id="ebGo">Créer l'ebook →</button>
@@ -1017,7 +1024,8 @@ function ebWatch(id){
     $('#ebProg').hidden=true;$('#ebDone').hidden=false;
     $('#ebCover').src='/api/job/'+id+'/ebook/cover';
     $('#ebDoneTitle').textContent=info.title||'';
-    $('#ebDoneMeta').textContent=`${info.pages||'?'} pages · ${(info.toc||[]).length} chapitres`+(info.univers?` · univers ${info.univers}`:'')+(info.images?(info.images_ok?` · ${info.images_ok} illustrations IA`:' · visuels graphiques (service d\'images indisponible)'):'');
+    const src=info.img_sources||{},parts=[];if(src.google)parts.push('couverture IA Google');if(src.pexels)parts.push(`${src.pexels} photo${src.pexels>1?'s':''} Pexels`);if(src.libre)parts.push(`${src.libre} image${src.libre>1?'s':''} IA gratuite${src.libre>1?'s':''}`);
+    $('#ebDoneMeta').textContent=`${info.pages||'?'} pages · ${(info.toc||[]).length} chapitres`+(info.univers?` · univers ${info.univers}`:'')+(info.images?(parts.length?' · '+parts.join(', '):' · sans images (services indisponibles)'):'');
     $('#ebToc').innerHTML=(info.toc||[]).map(t=>`<li>${esc(t)}</li>`).join('');
     $('#ebPdf').href='/api/job/'+id+'/ebook/pdf';$('#ebDocx').href='/api/job/'+id+'/ebook/docx';
     try{localStorage.setItem('ebDoneId',id);localStorage.setItem('ebDoneTitle',info.title||'')}catch(e){}

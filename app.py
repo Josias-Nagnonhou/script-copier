@@ -31,6 +31,25 @@ def find_groq_key():
 
 
 GROQ_KEY = find_groq_key()
+
+
+def find_env_key(hint, prefix=None):
+    """Clé tolérante : nom de variable approximatif accepté (espaces, minuscules, guillemets)."""
+    for k, v in os.environ.items():
+        v = (v or "").strip().strip('"').strip("'").strip()
+        if hint in k.strip().upper() and v:
+            return v
+    if prefix:
+        for v in os.environ.values():
+            v = (v or "").strip().strip('"').strip("'")
+            if v.startswith(prefix) and len(v) > 30:
+                return v
+    return ""
+
+
+GEMINI_KEY = find_env_key("GEMINI", "AIza") or find_env_key("GOOGLE_API")
+PEXELS_KEY = find_env_key("PEXELS")
+print("Images : Google", "oui" if GEMINI_KEY else "non", "| Pexels", "oui" if PEXELS_KEY else "non", flush=True)
 print("Clé Groq :", "trouvée" if GROQ_KEY else "ABSENTE", "| variables :",
       sorted(k for k in os.environ if k.isupper() and not k.startswith(("RENDER", "PYTHON", "PATH", "HOME", "LANG", "GPG", "HOSTNAME"))), flush=True)
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "whisper-large-v3-turbo")
@@ -436,7 +455,8 @@ def login():
 def index():
     if not authed():
         return redirect("/login")
-    return render_template("index.html", groq=bool(GROQ_KEY), yt=YT["status"], yt_src=YT["source"])
+    return render_template("index.html", groq=bool(GROQ_KEY), yt=YT["status"], yt_src=YT["source"],
+                           gemini=bool(GEMINI_KEY), pexels=bool(PEXELS_KEY))
 
 
 @app.post("/api/start")
@@ -1584,25 +1604,38 @@ def run_ebook_job(job, ctx):
         cover = os.path.join(d, "cover.jpg")
         cw, chh = EB.cover_size(uni)
         imgs_ok = 0
+        credits, used = [], set()
+        src_count = {"google": 0, "pexels": 0, "libre": 0}
         if job["images"]:
-            job["step"] = "Illustration de la couverture…"
-            if EB.fetch_image(plan.get("cover_prompt") or ctx["title"], cw, chh, seed, cover, log=print, uni=uni):
-                imgs_ok += 1
+            job["step"] = "Création de la couverture…"
+            cprompt = plan.get("cover_prompt") or ctx["title"]
+            if GEMINI_KEY and EB.fetch_gemini(cprompt, cw, chh, cover, GEMINI_KEY, log=print, uni=uni):
+                src_count["google"] += 1
+            elif EB.fetch_image(cprompt, cw, chh, seed, cover, log=print, uni=uni):
+                src_count["libre"] += 1
+            elif PEXELS_KEY and (cr := EB.fetch_pexels(chs[0].get("photo_query") or ctx["title"], cover, PEXELS_KEY, used,
+                                                       log=print, orientation="portrait")):
+                credits.append(cr); src_count["pexels"] += 1
             else:
                 EB.make_art(pal, cover, cw, chh, seed)
             tick("Couverture prête")
             for k, c in enumerate(chs):
-                job["step"] = f"Illustration du chapitre {k + 1}/{len(chs)}…"
+                job["step"] = f"Image du chapitre {k + 1}/{len(chs)}…"
                 pth = os.path.join(d, f"ch{k + 1}.jpg")
-                if EB.fetch_image(c.get("image_prompt") or c["titre"], 1280, 896 if uni in ("sacre", "luxe") else 720,
-                                  seed + k + 1, pth, log=print, uni=uni):
-                    imgs_ok += 1
-                else:
-                    EB.make_art(pal, pth, 1280, 896 if uni in ("sacre", "luxe") else 720, seed + k + 1)
-                c["img"] = pth
-                tick(f"Illustration {k + 1} prête")
+                ok = False
+                if PEXELS_KEY:
+                    cr = EB.fetch_pexels(c.get("photo_query") or c.get("image_prompt") or c["titre"], pth, PEXELS_KEY, used, log=print)
+                    if cr:
+                        credits.append(cr); src_count["pexels"] += 1; ok = True
+                if not ok and not PEXELS_KEY and EB.fetch_image(c.get("image_prompt") or c["titre"], 1280,
+                                                                896 if uni in ("sacre", "luxe") else 720, seed + k + 1, pth, log=print, uni=uni):
+                    src_count["libre"] += 1; ok = True
+                c["img"] = pth if ok else None  # pas de visuel de remplissage : ouverture sobre sans image
+                tick(f"Image {k + 1} prête")
         else:
             EB.make_art(pal, cover, cw, chh, seed)
+        imgs_ok = sum(src_count.values())
+        job["img_sources"] = src_count
         job["images_ok"] = imgs_ok
         job["step"], job["pct"] = "Mise en page du PDF…", 94
         others = [o for o in ctx.get("others") or [] if o.get("nom") and o.get("nom") != ctx.get("title")]
@@ -1612,7 +1645,7 @@ def run_ebook_job(job, ctx):
                 "etiquette": (plan.get("design") or {}).get("etiquette") or "Guide pratique",
                 "auteur": ctx.get("author") or "", "boutique": ctx.get("shop") or "", "cover_img": cover,
                 "intro": intro, "chapitres": chs, "bonus_titre": (plan.get("bonus") or {}).get("titre"),
-                "bonus_texte": bonus, "conclusion": concl, "autres_produits": others}
+                "bonus_texte": bonus, "conclusion": concl, "autres_produits": others, "credits": credits}
         safe = re.sub(r"[^\w-]+", "_", book["titre"])[:50].strip("_") or "ebook"
         job["pdf"] = os.path.join(d, safe + ".pdf")
         job["docx"] = os.path.join(d, safe + ".docx")
@@ -1741,7 +1774,8 @@ def job_ebook(jid):
     if not j or j.get("phase") != "done":
         return jsonify(error="Ebook introuvable"), 404
     return jsonify(title=j.get("book_title"), toc=j.get("toc", []), pages=j.get("page_count", 0),
-                   images_ok=j.get("images_ok", 0), images=j.get("images"), univers=j.get("univers", ""))
+                   images_ok=j.get("images_ok", 0), images=j.get("images"), univers=j.get("univers", ""),
+                   img_sources=j.get("img_sources", {}))
 
 
 @app.get("/api/job/<jid>/ebook/<kind>")

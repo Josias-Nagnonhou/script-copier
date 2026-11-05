@@ -123,6 +123,11 @@ def place_with_shadow(canvas, book, x, y, strength=150, floor=True):
 
 # ---------------------------------------------------------------- texte
 def wrap(draw, text, fnt, maxw):
+    try:
+        from ebook import clean
+        text = clean(text)
+    except Exception:
+        pass
     words, lines, cur = text.split(), [], ""
     for w in words:
         t = (cur + " " + w).strip()

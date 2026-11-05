@@ -133,12 +133,80 @@ def resolve_design(design):
 
 
 # ---------------------------------------------------------------- texte
-EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿️‍]")
+EMOJI = re.compile("[\U0001F000-\U0001FAFF️​-‍⁠]")
+# caractères que les polices du livre n'ont pas → équivalents lisibles
+GLYPHS = {" ": " ", " ": " ", " ": " ", " ": " ", " ": " ",
+          "→": "–", "⇒": "–", "➜": "–", "←": "–", "✓": "", "✔": "", "✅": "",
+          "☑": "", "✗": "×", "✘": "×", "❌": "×", "★": "•", "☆": "•", "♥": "",
+          "❤": "", "■": "•", "□": "•", "●": "•", "○": "•", "◆": "•", "◇": "•",
+          "▪": "•", "▫": "•", "‣": "•", "◦": "•", "‐": "-", "‑": "-", "‒": "–",
+          "―": "—", "‟": "\"", "‛": "'", "№": "N°", " ": " ", "\t": " ", "\r": ""}
+_SAFE = None
+
+
+def safe_chars():
+    """Caractères présents dans les 3 polices de texte (Poppins, Spectral, Lato)."""
+    global _SAFE
+    if _SAFE is None:
+        try:
+            from fontTools.ttLib import TTFont as FT
+            sets = [set(FT(os.path.join(FONT_DIR, f + ".ttf")).getBestCmap()) for f in
+                    ("Poppins-Regular", "Spectral-Regular", "Lato-Regular")]
+            _SAFE = set.intersection(*sets)
+        except Exception:
+            _SAFE = set()
+    return _SAFE
 
 
 def clean(t):
     t = EMOJI.sub("", str(t or ""))
-    return t.replace(" ", " ").replace("\t", " ").strip()
+    for a, b in GLYPHS.items():
+        t = t.replace(a, b)
+    ok = safe_chars()
+    if ok:
+        t = "".join(ch for ch in t if ord(ch) < 128 or ord(ch) in ok)
+    t = re.sub(r"(?<=\S)[ \u00a0]{2,}(?=\S)", " ", t)
+    return t.strip()
+
+
+def tidy_md(md):
+    """Nettoie un texte rédigé par l'IA : phrases parasites, doublons, balises cassées."""
+    md = clean(md).replace("```markdown", "").replace("```", "")
+    md = re.sub(r"<br\s*/?>", "\n", md)
+    md = re.sub(r"</?(?:b|i|strong|em|u|p|span|div)[^>]*>", "", md)
+    out, seen, open_box = [], set(), False
+    for ln in md.split("\n"):
+        s = ln.strip()
+        low = s.lower()
+        if re.match(r"^(voici|bien sûr|certainement|d'accord|here is|here's|sure)\b.*[:：]$", low):
+            continue  # phrase d'introduction de l'IA
+        if re.match(r"^(#+\s*)?(chapitre|chapter)\s+\d+\s*[:\-–—.]?\s*$", low):
+            continue  # « Chapitre 3 » répété seul
+        if s.startswith(":::"):
+            if s == ":::":
+                if not open_box:
+                    continue
+                open_box = False
+            else:
+                if open_box:
+                    out.append(":::")
+                open_box = True
+        elif s.startswith("#") and open_box:
+            out.append(":::")
+            open_box = False
+        if s.count("**") % 2:
+            ln = ln.replace("**", "")
+        key = re.sub(r"\W+", "", low)
+        if len(key) > 60 and key in seen:
+            continue  # paragraphe répété mot pour mot
+        if len(key) > 60:
+            seen.add(key)
+        out.append(ln.rstrip())
+    if open_box:
+        out.append(":::")
+    md = "\n".join(out)
+    md = re.sub(r"(?<=[.!?…])\s+([^.!?…\n]{40,}[.!?…])(\s+\1)+", r" \1", md)  # phrase collée deux fois
+    return re.sub(r"\n{3,}", "\n\n", md).strip()
 
 
 def inline(t):
@@ -254,7 +322,10 @@ STYLE_RULES = (
     "une vraie valeur qu'on ne trouve pas en 2 minutes sur Internet : méthode pas à pas, exemples concrets tirés "
     "de la vie en Afrique francophone (prénoms, villes, situations, monnaie en FCFA), erreurs fréquentes et comment "
     "les éviter, exercices à faire. Interdits : remplissage, répétitions, généralités creuses, promesses miracles, "
-    "chiffres ou études inventés, fausses citations. Pour un verset, un hadith ou une citation, donne la référence "
+    "chiffres ou études inventés, fausses citations, mélange de langues (tout en français). Si le sujet touche à "
+    "l'actualité récente (résultats, votes, transferts, élections, événements de l'année en cours), n'invente AUCUN fait, "
+    "nom, score ou déclaration : appuie-toi seulement sur ce qui est établi, explique les mécanismes et invite le lecteur "
+    "à vérifier les dernières informations. Pour un verset, un hadith ou une citation, donne la référence "
     "exacte et ne cite que des textes très connus ; sinon reformule sans guillemets. Pas d'emoji."
 )
 
@@ -287,7 +358,8 @@ def gen_plan(chat, ctx, pages):
             "\"cover_prompt\": \"description en ANGLAIS d'une illustration de couverture (scène, ambiance, lumière, sans texte)\", "
             "\"ce_que_tu_vas_obtenir\": [\"5 bénéfices concrets\"], \"avertissement\": \"une phrase si le sujet touche à la santé, l'argent, le droit ou la religion, sinon vide\", "
             f"\"chapitres\": [{{\"titre\": \"\", \"objectif\": \"ce que le lecteur saura faire après\", \"sections\": [\"" + str(n_sec) + " titres de parties\"], "
-            "\"image_prompt\": \"description en ANGLAIS d'une illustration pour ce chapitre (scène concrète, sans texte)\"}}], "
+            "\"image_prompt\": \"description en ANGLAIS d'une illustration pour ce chapitre (scène concrète, sans texte)\", "
+            "\"photo_query\": \"3 à 5 mots-clés en ANGLAIS pour trouver une vraie photo dans une banque d'images (ex. : african woman praying sunrise) ; ajoute african si des personnes apparaissent\"}}], "
             "\"bonus\": {\"titre\": \"\", \"type\": \"checklist, plan sur 7 jours, fiches pratiques ou tableau de suivi\"}}\n"
             f"Il faut exactement {n_ch} chapitres, dans un ordre logique du plus simple au plus avancé. "
             "Direction artistique : choisis l'univers qui colle le mieux au sujet et à l'émotion recherchée, et invente une "
@@ -343,7 +415,8 @@ def gen_section(chat, plan, ctx, kind, words, idx=None, prev="", part=None):
                 "et un message motivant. Pas de sous-titres « ## ».")
     system = "Tu es l'auteur de cet ebook, expert du sujet. " + STYLE_RULES + "\n" + FORMAT_RULES
     tokens = int(min(8000, words * 2.3 + 900))
-    return chat([{"role": "system", "content": system}, {"role": "user", "content": base + "\n" + task}], max_tokens=tokens)
+    txt = chat([{"role": "system", "content": system}, {"role": "user", "content": base + "\n" + task}], max_tokens=tokens)
+    return tidy_md(txt)
 
 
 # ---------------------------------------------------------------- illustrations
@@ -373,6 +446,105 @@ def fetch_image(prompt, w, h, seed, path, log=print, uni="moderne"):
             log(f"[ebook] image en échec : {type(e).__name__} {str(e)[:80]}")
         time.sleep(6 + attempt * 6)
     return False
+
+
+GEMINI_MODELS = [m.strip() for m in os.environ.get("GEMINI_IMAGE_MODELS", "gemini-nano-banana-2.1,gemini-3.1-flash-image,gemini-2.5-flash-image").split(",") if m.strip()]
+ASPECTS = {"1:1": 1, "3:2": 1.5, "2:3": .667, "3:4": .75, "4:3": 1.333, "4:5": .8, "5:4": 1.25, "9:16": .5625, "16:9": 1.778}
+
+
+def nearest_aspect(w, h):
+    r = w / h
+    return min(ASPECTS, key=lambda k: abs(ASPECTS[k] - r))
+
+
+def _find_image_b64(obj, depth=0):
+    """Cherche l'image (base64) dans une réponse Gemini, quel que soit le format exact."""
+    if depth > 10:
+        return None
+    if isinstance(obj, dict):
+        inl = obj.get("inlineData") or obj.get("inline_data")
+        if isinstance(inl, dict) and inl.get("data"):
+            return inl["data"]
+        if obj.get("data") and isinstance(obj["data"], str) and len(obj["data"]) > 1000 and \
+                (obj.get("type") == "image" or str(obj.get("mime_type") or obj.get("mimeType") or "").startswith("image")):
+            return obj["data"]
+        vals = obj.values()
+    elif isinstance(obj, list):
+        vals = obj
+    else:
+        return None
+    for v in vals:
+        r = _find_image_b64(v, depth + 1)
+        if r:
+            return r
+    return None
+
+
+def fetch_gemini(prompt, w, h, path, key, log=print, uni="moderne", size="2K"):
+    """Image sur mesure par l'IA de Google (Nano Banana). Renvoie True si l'image est enregistrée."""
+    import base64
+    style = STYLES.get(uni, STYLES["moderne"])["img"]
+    full = (f"{clean(prompt)[:700]}. Style: {style}. Photorealistic or high-end editorial illustration, beautiful composition, "
+            "professional book cover art quality, any people shown are Black African, no text, no letters, no words, no logo, no watermark.")
+    aspect = nearest_aspect(w, h)
+    hdr = {"x-goog-api-key": key, "Content-Type": "application/json"}
+    for model in GEMINI_MODELS:
+        attempts = (
+            ("https://generativelanguage.googleapis.com/v1beta/interactions",
+             {"model": model, "input": full, "response_format": {"type": "image", "mime_type": "image/jpeg",
+                                                                  "aspect_ratio": aspect, "image_size": size}}),
+            (f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+             {"contents": [{"parts": [{"text": full}]}],
+              "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": aspect}}}),
+        )
+        for url, body in attempts:
+            try:
+                r = requests.post(url, headers=hdr, json=body, timeout=180)
+            except Exception as e:
+                log(f"[ebook] Gemini {model} : {type(e).__name__}")
+                continue
+            if r.status_code == 200:
+                b64 = _find_image_b64(r.json())
+                if b64:
+                    im = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+                    im.save(path, "JPEG", quality=92)
+                    log(f"[ebook] image Google OK ({model}, {im.width}x{im.height})")
+                    return True
+                log(f"[ebook] Gemini {model} : réponse sans image")
+            elif r.status_code in (401, 403):
+                log(f"[ebook] Gemini refusé ({r.status_code}) : clé invalide ou facturation non activée · {r.text[:160]}")
+                return False
+            else:
+                log(f"[ebook] Gemini {model} {url.rsplit('/', 1)[-1][:20]} : {r.status_code} {r.text[:140]}")
+    return False
+
+
+def fetch_pexels(query, path, key, used, log=print, orientation="landscape"):
+    """Vraie photo Pexels pour ces mots-clés (jamais deux fois la même dans un livre). Renvoie le crédit ou None."""
+    q = re.sub(r"[^\w\s-]", " ", clean(query))[:80].strip()
+    tries = [q] + ([" ".join(q.split()[:3])] if len(q.split()) > 3 else [])
+    for qq in tries:
+        try:
+            r = requests.get("https://api.pexels.com/v1/search", headers={"Authorization": key}, timeout=30,
+                             params={"query": qq, "orientation": orientation, "per_page": 15, "size": "large"})
+        except Exception as e:
+            log(f"[ebook] Pexels : {type(e).__name__}"); return None
+        if r.status_code in (401, 403):
+            log("[ebook] Pexels : clé refusée"); return None
+        if r.status_code != 200:
+            log(f"[ebook] Pexels {r.status_code}"); continue
+        for ph in r.json().get("photos") or []:
+            if ph["id"] in used:
+                continue
+            try:
+                img = requests.get(ph["src"].get("large2x") or ph["src"]["original"], timeout=60)
+                im = Image.open(io.BytesIO(img.content)).convert("RGB")
+                im.save(path, "JPEG", quality=90)
+                used.add(ph["id"])
+                return {"name": ph.get("photographer", ""), "url": ph.get("url", "")}
+            except Exception:
+                continue
+    return None
 
 
 def make_art(pal, path, w, h, seed):
@@ -1044,6 +1216,11 @@ def build_pdf(book, path):
         story += [PageBreak()] + section_head("Conclusion", "Et maintenant ?")
         for b in parse_md(book["conclusion"]):
             story += render(b)
+    credits = [c for c in book.get("credits") or [] if c.get("name")]
+    if credits:
+        names = ", ".join(dict.fromkeys(plain(c["name"]) for c in credits))
+        story += [Spacer(1, .6 * cm), Paragraph(inline(f"Crédits photos : photos fournies par Pexels ({names})."),
+                                                ParagraphStyle("cred", parent=st["body"], fontSize=8, leading=11.5, textColor=MUTED))]
     others = [o for o in book.get("autres_produits") or [] if o.get("nom")]
     if others or book.get("boutique"):
         story += [PageBreak(), eyebrow("Pour aller plus loin"), Paragraph(up("Continue ta progression"), st["big"]),

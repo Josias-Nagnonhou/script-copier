@@ -14,6 +14,18 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer, PageBreak,
                                 NextPageTemplate, Table, TableStyle, KeepTogether, Flowable, CondPageBreak)
 from reportlab.platypus import Image as RLImage
+_RLParagraph = Paragraph
+
+
+class Paragraph(_RLParagraph):
+    """Paragraphe qui ne fait jamais planter le livre : en cas de balisage invalide, on garde le texte brut."""
+    def __init__(self, text, *a, **k):
+        try:
+            super().__init__(text, *a, **k)
+        except Exception:
+            import re as _re
+            bare = _re.sub(r"<[^>]+>", "", str(text))
+            super().__init__(bare.replace("&", "&amp;").replace("&amp;amp;", "&amp;").replace("<", "&lt;"), *a, **k)
 from reportlab.platypus.tableofcontents import TableOfContents
 from docx import Document
 from docx.shared import Pt, RGBColor, Cm
@@ -216,7 +228,30 @@ def inline(t):
     t = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<i>\1</i>", t)
     t = re.sub(r"__(.+?)__", r"<b>\1</b>", t)
     t = t.replace("`", "")
-    return t
+    return balance_tags(t)
+
+
+def balance_tags(t):
+    """Répare les balises <b>/<i> mal imbriquées (« **gras *italique*** ») qui font planter ReportLab."""
+    out, stack, pos = [], [], 0
+    for m in re.finditer(r"</?([bi])>", t):
+        out.append(t[pos:m.start()]); pos = m.end()
+        tag, closing = m.group(1), m.group(0).startswith("</")
+        if not closing:
+            if tag in stack:
+                continue  # déjà ouvert : on ignore
+            stack.append(tag); out.append(f"<{tag}>")
+        elif tag in stack:
+            reopen = []
+            while stack[-1] != tag:
+                x = stack.pop(); out.append(f"</{x}>"); reopen.append(x)
+            stack.pop(); out.append(f"</{tag}>")
+            for x in reversed(reopen):
+                stack.append(x); out.append(f"<{x}>")
+        # balise fermante orpheline : supprimée
+    out.append(t[pos:])
+    out.extend(f"</{x}>" for x in reversed(stack))
+    return re.sub(r"<([bi])></\1>", "", "".join(out))
 
 
 def plain(t):

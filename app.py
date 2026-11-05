@@ -2925,5 +2925,29 @@ def health():
     return "ok"
 
 
+# ------------------------------------------------ garder le serveur éveillé pendant un long travail
+@app.get("/ping")
+def ping():
+    return "ok"
+
+
+def _keepalive():
+    """Le plan gratuit de Render endort le serveur après ~15 min sans visite, même si un ebook est en cours.
+    Tant qu'un ebook ou un kit tourne, le serveur se rend visite toutes les 4 minutes."""
+    url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kopi-x5eh.onrender.com").rstrip("/") + "/ping"
+    while True:
+        time.sleep(240)
+        busy = any(j.get("platform") in ("ebook", "kit") and j.get("phase") in ("queued", "transcribing")
+                   for j in list(JOBS.values()))
+        if busy:
+            try:
+                requests.get(url, timeout=20)
+            except Exception:
+                pass
+
+
+threading.Thread(target=_keepalive, daemon=True).start()
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)

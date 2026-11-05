@@ -541,7 +541,38 @@ def fetch_pexels(query, path, key, used, log=print, orientation="landscape"):
                 im = Image.open(io.BytesIO(img.content)).convert("RGB")
                 im.save(path, "JPEG", quality=90)
                 used.add(ph["id"])
-                return {"name": ph.get("photographer", ""), "url": ph.get("url", "")}
+                return {"name": ph.get("photographer", ""), "url": ph.get("url", ""), "src": "Pexels"}
+            except Exception:
+                continue
+    return None
+
+
+def fetch_pixabay(query, path, key, used, log=print, orientation="horizontal"):
+    """Vraie photo Pixabay (téléchargée sur le serveur, jamais deux fois la même). Renvoie le crédit ou None."""
+    q = re.sub(r"[^\w\s-]", " ", clean(query))[:95].strip()
+    tries = [q] + ([" ".join(q.split()[:3])] if len(q.split()) > 3 else []) + ([" ".join(q.split()[:2])] if len(q.split()) > 2 else [])
+    for qq in tries:
+        try:
+            r = requests.get("https://pixabay.com/api/", timeout=30,
+                             params={"key": key, "q": qq, "image_type": "photo", "orientation": orientation,
+                                     "safesearch": "true", "per_page": 30, "min_width": 1200, "order": "popular"})
+        except Exception as e:
+            log(f"[ebook] Pixabay : {type(e).__name__}"); return None
+        if r.status_code in (400, 401, 403):
+            log(f"[ebook] Pixabay refusé ({r.status_code}) : {r.text[:120]}"); return None
+        if r.status_code != 200:
+            log(f"[ebook] Pixabay {r.status_code}"); continue
+        for ph in r.json().get("hits") or []:
+            if ("pb", ph["id"]) in used:
+                continue
+            try:
+                img = requests.get(ph.get("fullHDURL") or ph["largeImageURL"], timeout=60)
+                im = Image.open(io.BytesIO(img.content)).convert("RGB")
+                if im.width < 900:
+                    continue
+                im.save(path, "JPEG", quality=90)
+                used.add(("pb", ph["id"]))
+                return {"name": ph.get("user", ""), "url": ph.get("pageURL", ""), "src": "Pixabay"}
             except Exception:
                 continue
     return None
@@ -1218,8 +1249,11 @@ def build_pdf(book, path):
             story += render(b)
     credits = [c for c in book.get("credits") or [] if c.get("name")]
     if credits:
-        names = ", ".join(dict.fromkeys(plain(c["name"]) for c in credits))
-        story += [Spacer(1, .6 * cm), Paragraph(inline(f"Crédits photos : photos fournies par Pexels ({names})."),
+        bits = []
+        for srcname in dict.fromkeys(c.get("src", "Pexels") for c in credits):
+            names = ", ".join(dict.fromkeys(plain(c["name"]) for c in credits if c.get("src", "Pexels") == srcname))
+            bits.append(f"{srcname} ({names})")
+        story += [Spacer(1, .6 * cm), Paragraph(inline("Crédits photos : photos fournies par " + " et ".join(bits) + "."),
                                                 ParagraphStyle("cred", parent=st["body"], fontSize=8, leading=11.5, textColor=MUTED))]
     others = [o for o in book.get("autres_produits") or [] if o.get("nom")]
     if others or book.get("boutique"):

@@ -47,9 +47,11 @@ def find_env_key(hint, prefix=None):
     return ""
 
 
-GEMINI_KEY = find_env_key("GEMINI", "AIza") or find_env_key("GOOGLE_API")
+GEMINI_KEY = find_env_key("GEMINI") or find_env_key("GOOGLE") or find_env_key("NANO", "AIza")
 PEXELS_KEY = find_env_key("PEXELS")
-print("Images : Google", "oui" if GEMINI_KEY else "non", "| Pexels", "oui" if PEXELS_KEY else "non", flush=True)
+PIXABAY_KEY = find_env_key("PIXABAY")
+print("Images : Google", "oui" if GEMINI_KEY else "non", "| Pexels", "oui" if PEXELS_KEY else "non",
+      "| Pixabay", "oui" if PIXABAY_KEY else "non", flush=True)
 print("Clé Groq :", "trouvée" if GROQ_KEY else "ABSENTE", "| variables :",
       sorted(k for k in os.environ if k.isupper() and not k.startswith(("RENDER", "PYTHON", "PATH", "HOME", "LANG", "GPG", "HOSTNAME"))), flush=True)
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "whisper-large-v3-turbo")
@@ -456,7 +458,7 @@ def index():
     if not authed():
         return redirect("/login")
     return render_template("index.html", groq=bool(GROQ_KEY), yt=YT["status"], yt_src=YT["source"],
-                           gemini=bool(GEMINI_KEY), pexels=bool(PEXELS_KEY))
+                           gemini=bool(GEMINI_KEY), pexels=bool(PEXELS_KEY or PIXABAY_KEY))
 
 
 @app.post("/api/start")
@@ -1605,7 +1607,7 @@ def run_ebook_job(job, ctx):
         cw, chh = EB.cover_size(uni)
         imgs_ok = 0
         credits, used = [], set()
-        src_count = {"google": 0, "pexels": 0, "libre": 0}
+        src_count = {"google": 0, "pexels": 0, "pixabay": 0, "libre": 0}
         if job["images"]:
             job["step"] = "Création de la couverture…"
             cprompt = plan.get("cover_prompt") or ctx["title"]
@@ -1613,9 +1615,9 @@ def run_ebook_job(job, ctx):
                 src_count["google"] += 1
             elif EB.fetch_image(cprompt, cw, chh, seed, cover, log=print, uni=uni):
                 src_count["libre"] += 1
-            elif PEXELS_KEY and (cr := EB.fetch_pexels(chs[0].get("photo_query") or ctx["title"], cover, PEXELS_KEY, used,
-                                                       log=print, orientation="portrait")):
-                credits.append(cr); src_count["pexels"] += 1
+            elif PIXABAY_KEY and (cr := EB.fetch_pixabay(chs[0].get("photo_query") or ctx["title"], cover, PIXABAY_KEY, used,
+                                                         log=print, orientation="vertical")):
+                credits.append(cr); src_count["pixabay"] += 1
             else:
                 EB.make_art(pal, cover, cw, chh, seed)
             tick("Couverture prête")
@@ -1623,12 +1625,21 @@ def run_ebook_job(job, ctx):
                 job["step"] = f"Image du chapitre {k + 1}/{len(chs)}…"
                 pth = os.path.join(d, f"ch{k + 1}.jpg")
                 ok = False
-                if PEXELS_KEY:
-                    cr = EB.fetch_pexels(c.get("photo_query") or c.get("image_prompt") or c["titre"], pth, PEXELS_KEY, used, log=print)
+                q = c.get("photo_query") or c.get("image_prompt") or c["titre"]
+                ih = 896 if uni in ("sacre", "luxe") else 720
+                if job.get("chapter_images") == "google" and GEMINI_KEY:
+                    if EB.fetch_gemini(c.get("image_prompt") or c["titre"], 1280, ih, pth, GEMINI_KEY, log=print, uni=uni, size="1K"):
+                        src_count["google"] += 1; ok = True
+                if not ok and PIXABAY_KEY:
+                    cr = EB.fetch_pixabay(q, pth, PIXABAY_KEY, used, log=print)
+                    if cr:
+                        credits.append(cr); src_count["pixabay"] += 1; ok = True
+                if not ok and PEXELS_KEY:
+                    cr = EB.fetch_pexels(q, pth, PEXELS_KEY, used, log=print)
                     if cr:
                         credits.append(cr); src_count["pexels"] += 1; ok = True
-                if not ok and not PEXELS_KEY and EB.fetch_image(c.get("image_prompt") or c["titre"], 1280,
-                                                                896 if uni in ("sacre", "luxe") else 720, seed + k + 1, pth, log=print, uni=uni):
+                if not ok and not (PIXABAY_KEY or PEXELS_KEY) and job.get("chapter_images") != "google" and \
+                        EB.fetch_image(c.get("image_prompt") or c["titre"], 1280, ih, seed + k + 1, pth, log=print, uni=uni):
                     src_count["libre"] += 1; ok = True
                 c["img"] = pth if ok else None  # pas de visuel de remplissage : ouverture sobre sans image
                 tick(f"Image {k + 1} prête")
@@ -1717,7 +1728,8 @@ def start_ebook():
                       for o in (d.get("others") or []) if isinstance(o, dict)][:6]}
     job = {"id": uuid.uuid4().hex[:12], "platform": "ebook", "source": title, "url": "", "limit": 0, "sort": "",
            "lang": "", "phase": "queued", "items": [], "source_name": title, "error": "", "created": time.time(),
-           "pages": pages, "images": bool(d.get("images", True)), "step": "En attente…", "pct": 0}
+           "pages": pages, "images": bool(d.get("images", True)), "step": "En attente…", "pct": 0,
+           "chapter_images": "google" if d.get("chapter_images") == "google" else "photo"}
     job["ctx"] = ctx
     with LOCK:
         JOBS[job["id"]] = job

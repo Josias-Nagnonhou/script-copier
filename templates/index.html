@@ -1018,10 +1018,14 @@ function ebWatch(id){
   clearInterval(ebTimer);ebSetBusy(true);$('#ebPanel').hidden=false;$('#ebProg').hidden=false;
   const tick=async()=>{
     let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
-    catch(e){clearInterval(ebTimer);ebSetBusy(false);$('#ebProg').hidden=true;try{localStorage.removeItem('ebJob')}catch(_){}if($('#ebDone').hidden&&!aCur)$('#ebPanel').hidden=true;return}
+    catch(e){clearInterval(ebTimer);ebSetBusy(false);try{localStorage.removeItem('ebJob')}catch(_){}
+      if(ebSavedOk()){ebOfferRestore();return}
+      $('#ebProg').hidden=true;if($('#ebDone').hidden&&!aCur)$('#ebPanel').hidden=true;return}
     $('#ebFill').style.width=Math.max(2,d.pct||0)+'%';$('#ebPct').textContent=Math.round(d.pct||0)+' %';
+    ebSave(id,d);
     if(!['done','error'].includes(d.phase)){$('#ebState').textContent=d.step||'Préparation…';return}
     clearInterval(ebTimer);ebSetBusy(false);
+    if(d.phase==='done'){try{localStorage.removeItem('ebSave')}catch(e){}}
     if(d.phase==='error'){ebErr(d.error);
       if(d.resumable){$('#ebState').insertAdjacentHTML('beforeend',' <button type="button" class="btn dl ebresume" id="ebResume">Reprendre la création</button>');
         $('#ebResume').onclick=async()=>{try{const r=await fetch('/api/job/'+id+'/resume',{method:'POST'});const x=await r.json();if(!r.ok)throw new Error(x.error);ebWatch(id)}catch(e){ebErr(e.message)}}}
@@ -1096,6 +1100,25 @@ $('#kCopyDesc').onclick=()=>copyText($('#kDesc').value,$('#kCopyDesc'),'Copier l
 $('#kCopyTitle').onclick=()=>copyText($('#kPTitle').value,$('#kCopyTitle'),'Copier');
 $('#kCopyHook').onclick=()=>copyText($('#kHook').value,$('#kCopyHook'),'Copier');
 try{const j=localStorage.getItem('kitJob');if(j)kWatch(j)}catch(e){}
+
+/* sauvegarde de l'ebook en cours dans le navigateur (survit à un redémarrage du serveur) */
+let ebLastSave=0;
+async function ebSave(id,d){
+  if(Date.now()-ebLastSave<20000&&d.phase!=='error')return;ebLastSave=Date.now();
+  try{const r=await fetch('/api/job/'+id+'/state');if(!r.ok)return;const x=await r.json();localStorage.setItem('ebSave',JSON.stringify(x))}catch(e){}
+}
+function ebSavedOk(){try{const x=JSON.parse(localStorage.getItem('ebSave')||'null');return !!(x&&x.st&&x.st.plan)}catch(e){return false}}
+function ebOfferRestore(){
+  let x=null;try{x=JSON.parse(localStorage.getItem('ebSave'))}catch(e){}
+  if(!x)return;
+  $('#ebPanel').hidden=false;$('#ebProg').hidden=false;$('#ebDone').hidden=true;
+  const tot=(x.st.plan.chapitres||[]).length;
+  $('#ebState').innerHTML=`<span class="err">Le serveur a redémarré pendant la création de « ${esc(x.ctx.title)} ». ${x.written}/${tot} chapitres étaient déjà écrits et sont sauvegardés sur cet appareil.</span> <button type="button" class="btn dl ebresume" id="ebRestore">Reprendre la création</button> <button type="button" class="linkbtn" id="ebForget">Abandonner</button>`;
+  $('#ebRestore').onclick=async()=>{try{const r=await fetch('/api/ebook/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(x)});
+    const d=await r.json();if(!r.ok)throw new Error(d.error);try{localStorage.setItem('ebJob',d.job_id)}catch(e){}ebWatch(d.job_id)}catch(e){ebErr(e.message)}};
+  $('#ebForget').onclick=()=>{try{localStorage.removeItem('ebSave')}catch(e){};$('#ebProg').hidden=true;$('#ebPanel').hidden=!aCur};
+}
+try{if(!localStorage.getItem('ebJob')&&ebSavedOk()){const x=JSON.parse(localStorage.getItem('ebSave'));if(x)setTimeout(()=>{if(document.querySelector('#modeAu'))ebOfferRestore()},300)}}catch(e){}
 
 /* ---------- traduction ---------- */
 let tTimer=null,tBusy=false;

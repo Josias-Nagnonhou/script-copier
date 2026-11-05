@@ -1127,6 +1127,14 @@ def groq_chat(messages, max_tokens=6000, json_mode=False, tag="traduction"):
                     wait = float(r.headers.get("retry-after"))
                 except (TypeError, ValueError):
                     wait = 10 * (attempt + 1)
+                daily = r.status_code == 429 and (wait > 120 or any(k in r.text.lower() for k in
+                                                                    ("per day", "tokens per day", "tpd", "rpd", "daily")))
+                if daily:  # quota du jour épuisé pour CE modèle : on passe au suivant (quota séparé)
+                    last = f"{model} : limite du jour atteinte"
+                    print(f"[{tag}] {model} : limite du jour atteinte, passage au modèle suivant", flush=True)
+                    if GOOD_MODEL["name"] == model:
+                        GOOD_MODEL["name"] = None
+                    break
                 time.sleep(min(max(wait, 2), 90))
                 continue
             if r.status_code == 401:
@@ -1141,6 +1149,8 @@ def groq_chat(messages, max_tokens=6000, json_mode=False, tag="traduction"):
             break  # modèle indisponible ou requête trop grosse : on essaie le suivant
         else:
             raise RuntimeError("Limite Groq atteinte, réessaie dans quelques minutes.")
+    if "limite du jour" in last:
+        raise RuntimeError("Limite Groq du jour atteinte sur tous les modèles. Réessaie dans quelques heures.")
     raise RuntimeError(f"Aucun modèle d'IA disponible chez Groq ({last}).")
 
 
@@ -1736,6 +1746,45 @@ def start_ebook():
            "pages": pages, "images": bool(d.get("images", True)), "step": "En attente…", "pct": 0,
            "chapter_images": d.get("chapter_images") if d.get("chapter_images") in ("google", "web", "photo") else "web"}
     job["ctx"] = ctx
+    with LOCK:
+        JOBS[job["id"]] = job
+    threading.Thread(target=run_ebook_job, args=(job, ctx), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.get("/api/job/<jid>/state")
+def ebook_state(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "ebook" or not j.get("st", {}).get("plan"):
+        return jsonify(error="Pas encore d'état"), 404
+    st = j["st"]
+    return jsonify(st={"plan": st["plan"], "intro": st.get("intro"), "bonus": st.get("bonus"), "concl": st.get("concl")},
+                   ctx=j.get("ctx"), pages=j.get("pages"), images=j.get("images"), chapter_images=j.get("chapter_images"),
+                   written=sum(1 for c in st["plan"]["chapitres"] if c.get("texte")))
+
+
+@app.post("/api/ebook/restore")
+def ebook_restore():
+    """Reprend un ebook à partir de l'état gardé dans le navigateur (après un redémarrage du serveur)."""
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not GROQ_KEY:
+        return jsonify(error="La clé Groq n'est pas configurée."), 400
+    if any(x["platform"] == "ebook" and x["phase"] in ("queued", "transcribing") for x in JOBS.values()):
+        return jsonify(error="Un ebook est déjà en cours de création. Attends qu'il se termine."), 409
+    d = request.get_json(force=True) or {}
+    st, ctx = d.get("st") or {}, d.get("ctx") or {}
+    plan = st.get("plan") or {}
+    if not isinstance(plan, dict) or not plan.get("chapitres") or not ctx.get("title"):
+        return jsonify(error="Sauvegarde incomplète : relance la création."), 400
+    cleanup()
+    job = {"id": uuid.uuid4().hex[:12], "platform": "ebook", "source": ctx["title"], "url": "", "limit": 0, "sort": "",
+           "lang": "", "phase": "queued", "items": [], "source_name": ctx["title"], "error": "", "created": time.time(),
+           "pages": max(5, int(d.get("pages") or 30)), "images": bool(d.get("images", True)), "step": "Reprise…", "pct": 0,
+           "chapter_images": d.get("chapter_images") if d.get("chapter_images") in ("google", "web", "photo") else "web",
+           "ctx": ctx, "st": {"plan": plan, "intro": st.get("intro"), "bonus": st.get("bonus"), "concl": st.get("concl")}}
     with LOCK:
         JOBS[job["id"]] = job
     threading.Thread(target=run_ebook_job, args=(job, ctx), daemon=True).start()

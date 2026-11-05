@@ -269,7 +269,8 @@ FORMAT_RULES = (
 
 
 def gen_plan(chat, ctx, pages):
-    n_ch = max(4, min(12, round(pages / 5.5)))
+    n_ch = max(4, min(20, round(pages / 5.5)))
+    n_sec = max(3, min(8, round(pages * 230 / n_ch / 900)))  # parties par chapitre : ~900 mots chacune
     system = ("Tu es un éditeur expert en ebooks qui se vendent bien auprès des audiences francophones africaines "
               "et de la diaspora. Tu conçois des guides pratiques qui tiennent leur promesse. " + STYLE_RULES)
     title_rule = (f"Le titre est IMPOSÉ par l'auteur : « {ctx['title']} ». Mets exactement ce titre dans « titre », sans le modifier, "
@@ -285,7 +286,7 @@ def gen_plan(chat, ctx, pages):
             "\"etiquette\": \"2 ou 3 mots pour la couverture, ex. GUIDE PRATIQUE, PROGRAMME 21 JOURS, MANUEL\"}, "
             "\"cover_prompt\": \"description en ANGLAIS d'une illustration de couverture (scène, ambiance, lumière, sans texte)\", "
             "\"ce_que_tu_vas_obtenir\": [\"5 bénéfices concrets\"], \"avertissement\": \"une phrase si le sujet touche à la santé, l'argent, le droit ou la religion, sinon vide\", "
-            f"\"chapitres\": [{{\"titre\": \"\", \"objectif\": \"ce que le lecteur saura faire après\", \"sections\": [\"3 à 5 titres de parties\"], "
+            f"\"chapitres\": [{{\"titre\": \"\", \"objectif\": \"ce que le lecteur saura faire après\", \"sections\": [\"" + str(n_sec) + " titres de parties\"], "
             "\"image_prompt\": \"description en ANGLAIS d'une illustration pour ce chapitre (scène concrète, sans texte)\"}}], "
             "\"bonus\": {\"titre\": \"\", \"type\": \"checklist, plan sur 7 jours, fiches pratiques ou tableau de suivi\"}}\n"
             f"Il faut exactement {n_ch} chapitres, dans un ordre logique du plus simple au plus avancé. "
@@ -293,7 +294,8 @@ def gen_plan(chat, ctx, pages):
             "palette de 4 couleurs harmonieuses propre à CE livre (pas des couleurs génériques). "
             "Les illustrations : si des personnes apparaissent ce sont des personnes noires africaines ; "
             "ne représente jamais Dieu, un prophète ou une figure sacrée (préfère des scènes symboliques : lumière, mains, nature).")
-    from_json = chat([{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=3500, json_mode=True)
+    from_json = chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                     max_tokens=min(8000, 2200 + 260 * n_ch), json_mode=True)
     return from_json, n_ch
 
 
@@ -309,7 +311,7 @@ def gen_titles(chat, ctx, n=5):
     return raw
 
 
-def gen_section(chat, plan, ctx, kind, words, idx=None, prev=""):
+def gen_section(chat, plan, ctx, kind, words, idx=None, prev="", part=None):
     outline = "\n".join(f"{k + 1}. {c.get('titre', '')}" for k, c in enumerate(plan.get("chapitres") or []))
     base = (f"Ebook : « {plan.get('titre')} » — {plan.get('sous_titre', '')}\nPour qui : {plan.get('pour_qui', '')}\n"
             f"{make_context(ctx)}\n\nPlan complet :\n{outline}\n")
@@ -322,6 +324,16 @@ def gen_section(chat, plan, ctx, kind, words, idx=None, prev=""):
                 f"Parties à couvrir, chacune avec « ## » : {' | '.join(ch.get('sections') or [])}\n"
                 + (f"Le chapitre précédent a déjà couvert : {prev}. Ne le répète pas.\n" if prev else "")
                 + "Termine par un encadré « :::retenir À retenir » de 3 à 5 points.")
+    elif kind == "part":
+        ch = plan["chapitres"][idx]
+        secs = ch.get("sections") or []
+        task = (f"Chapitre {idx + 1} « {ch.get('titre')} » — objectif : {ch.get('objectif', '')}\n"
+                f"Parties du chapitre : {' | '.join(secs)}\n"
+                f"Écris UNIQUEMENT la partie {part + 1} « {secs[part]} » (environ {words} mots), en commençant par la ligne "
+                f"« ## {secs[part]} ». Va en profondeur : explications, exemples concrets, étapes, au moins un encadré. "
+                + ("Ne fais pas d'introduction générale du chapitre, elle est déjà écrite.\n" if part else "")
+                + ("Termine cette dernière partie par un encadré « :::retenir À retenir » de 3 à 5 points sur tout le chapitre."
+                   if part == len(secs) - 1 else "Ne conclus pas le chapitre : d'autres parties suivent."))
     elif kind == "bonus":
         b = plan.get("bonus") or {}
         task = (f"Écris le BONUS « {b.get('titre', 'Plan d’action')} » ({b.get('type', 'checklist')}), environ {words} mots : "

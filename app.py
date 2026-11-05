@@ -475,7 +475,8 @@ def job_status(jid):
     return jsonify(id=j["id"], phase=j["phase"], error=j["error"], source_name=j["source_name"],
                    platform=j["platform"], items=items, has_file=bool(j.get("file")),
                    part=j.get("part", 0), parts=j.get("parts", 0), duration=j.get("duration", 0),
-                   zip_size=j.get("zip_size", 0), step=j.get("step", ""), pct=j.get("pct", 0))
+                   zip_size=j.get("zip_size", 0), step=j.get("step", ""), pct=j.get("pct", 0),
+                   resumable=j.get("resumable", False))
 
 
 @app.get("/api/job/<jid>/text")
@@ -1521,39 +1522,62 @@ def run_ebook_job(job, ctx):
     job["dir"] = d
     chat = lambda m, **k: groq_chat(m, tag="ebook", **k)
     try:
-        job["phase"] = "transcribing"
-        job["step"], job["pct"] = "Conception du plan du livre…", 4
-        raw, n_ch = EB.gen_plan(chat, ctx, job["pages"])
-        plan = parse_json_loose(raw)
-        chs = [c for c in (plan.get("chapitres") or []) if c.get("titre")][:12]
-        if len(chs) < 3:
-            raise RuntimeError("Le plan proposé par l'IA est incomplet. Relance la création.")
-        plan["chapitres"] = chs
+        job["phase"], job["error"], job["resumable"] = "transcribing", "", False
+        st = job.setdefault("st", {})  # état conservé : une reprise repart d'ici
+        if not st.get("plan"):
+            job["step"], job["pct"] = "Conception du plan du livre…", 4
+            raw, n_ch = EB.gen_plan(chat, ctx, job["pages"])
+            plan = parse_json_loose(raw)
+            chs = [c for c in (plan.get("chapitres") or []) if c.get("titre")][:20]
+            if len(chs) < 3:
+                raise RuntimeError("Le plan proposé par l'IA est incomplet. Relance la création.")
+            plan["chapitres"] = chs
+            if ctx.get("keep_title"):
+                plan["titre"] = ctx["title"]  # le titre choisi par l'auteur est conservé tel quel
+            st["plan"] = plan
+        plan = st["plan"]
+        chs = plan["chapitres"]
         job["toc"] = [c["titre"] for c in chs]
-        if ctx.get("keep_title"):
-            plan["titre"] = ctx["title"]  # le titre choisi par l'auteur est conservé tel quel
         job["book_title"] = plan.get("titre") or ctx["title"]
         total = job["pages"] * 230
-        w_intro, w_bonus, w_concl = 380, max(300, min(700, total // 12)), 300
+        w_intro, w_bonus, w_concl = 380, max(300, min(900, total // 12)), 320
         w_ch = max(500, (total - w_intro - w_bonus - w_concl) // len(chs))
         steps = len(chs) + 3 + (len(chs) + 1 if job["images"] else 0)
-        done = [0]
+        done = [sum(1 for k in ("intro", "bonus", "concl") if st.get(k)) + sum(1 for c in chs if c.get("texte"))]
 
         def tick(label):
             done[0] += 1
             job["step"], job["pct"] = label, 6 + int(done[0] / steps * 86)
-        job["step"] = "Rédaction de l'introduction…"
-        intro = EB.gen_section(chat, plan, ctx, "intro", w_intro); tick("Introduction écrite")
-        prev = ""
+        if not st.get("intro"):
+            job["step"] = "Rédaction de l'introduction…"
+            st["intro"] = EB.gen_section(chat, plan, ctx, "intro", w_intro); tick("Introduction écrite")
+        intro = st["intro"]
         for k, c in enumerate(chs):
-            job["step"] = f"Rédaction du chapitre {k + 1}/{len(chs)} · {c['titre'][:60]}"
-            c["texte"] = EB.gen_section(chat, plan, ctx, "chapter", w_ch, idx=k, prev=prev)
-            prev = c["titre"]
+            if c.get("texte"):
+                continue
+            prev = chs[k - 1]["titre"] if k else ""
+            secs = [x for x in (c.get("sections") or []) if x][:8]
+            if w_ch > 1700 and len(secs) >= 2:
+                # chapitre long : une partie à la fois, sinon l'IA raccourcit
+                parts = c.setdefault("parts", [])
+                for j, sec in enumerate(secs):
+                    if j < len(parts):
+                        continue
+                    job["step"] = f"Chapitre {k + 1}/{len(chs)} · partie {j + 1}/{len(secs)} · {sec[:50]}"
+                    parts.append(EB.gen_section(chat, plan, ctx, "part", w_ch // len(secs), idx=k, prev=prev, part=j))
+                c["texte"] = "\n\n".join(parts)
+            else:
+                job["step"] = f"Rédaction du chapitre {k + 1}/{len(chs)} · {c['titre'][:60]}"
+                c["texte"] = EB.gen_section(chat, plan, ctx, "chapter", w_ch, idx=k, prev=prev)
             tick(f"Chapitre {k + 1} écrit")
-        job["step"] = "Rédaction du bonus…"
-        bonus = EB.gen_section(chat, plan, ctx, "bonus", w_bonus); tick("Bonus écrit")
-        job["step"] = "Rédaction de la conclusion…"
-        concl = EB.gen_section(chat, plan, ctx, "conclusion", w_concl); tick("Conclusion écrite")
+        if not st.get("bonus"):
+            job["step"] = "Rédaction du bonus…"
+            st["bonus"] = EB.gen_section(chat, plan, ctx, "bonus", w_bonus); tick("Bonus écrit")
+        bonus = st["bonus"]
+        if not st.get("concl"):
+            job["step"] = "Rédaction de la conclusion…"
+            st["concl"] = EB.gen_section(chat, plan, ctx, "conclusion", w_concl); tick("Conclusion écrite")
+        concl = st["concl"]
         uni, pal = EB.resolve_design(plan.get("design"))
         job["univers"] = EB.STYLES[uni]["label"]
         seed = random.randint(1, 10 ** 6)
@@ -1624,7 +1648,12 @@ def run_ebook_job(job, ctx):
     except Exception as e:
         msg = str(e)
         print(f"[ebook {job['id']}] erreur : {msg[:300]}", flush=True)
-        job["phase"], job["error"] = "error", msg[:300]
+        if job.get("st", {}).get("plan"):
+            job["resumable"] = True
+            written = sum(1 for c in job["st"]["plan"]["chapitres"] if c.get("texte"))
+            msg += (f" Rien n'est perdu : {written} chapitre(s) déjà écrit(s). "
+                    "Clique sur « Reprendre la création » (si c'est la limite Groq du jour, attends quelques heures).")
+        job["phase"], job["error"] = "error", msg[:500]
     finally:
         job["finished"] = time.time()
 
@@ -1643,7 +1672,7 @@ def start_ebook():
     if any(j["platform"] == "ebook" and j["phase"] in ("queued", "transcribing") for j in JOBS.values()):
         return jsonify(error="Un ebook est déjà en cours de création. Attends qu'il se termine."), 409
     try:
-        pages = max(10, min(int(d.get("pages") or 30), 100))
+        pages = max(5, int(d.get("pages") or 30))
     except ValueError:
         pages = 30
     keep = lambda v, n: v[:n] if isinstance(v, str) else ""
@@ -1656,10 +1685,26 @@ def start_ebook():
     job = {"id": uuid.uuid4().hex[:12], "platform": "ebook", "source": title, "url": "", "limit": 0, "sort": "",
            "lang": "", "phase": "queued", "items": [], "source_name": title, "error": "", "created": time.time(),
            "pages": pages, "images": bool(d.get("images", True)), "step": "En attente…", "pct": 0}
+    job["ctx"] = ctx
     with LOCK:
         JOBS[job["id"]] = job
     threading.Thread(target=run_ebook_job, args=(job, ctx), daemon=True).start()
     return jsonify(job_id=job["id"])
+
+
+@app.post("/api/job/<jid>/resume")
+def resume_ebook(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "ebook" or not j.get("resumable") or not j.get("ctx"):
+        return jsonify(error="Cette création ne peut pas être reprise (le serveur a peut-être redémarré). Relance-la."), 404
+    if any(x["platform"] == "ebook" and x["phase"] in ("queued", "transcribing") for x in JOBS.values()):
+        return jsonify(error="Un ebook est déjà en cours de création. Attends qu'il se termine."), 409
+    j.pop("finished", None)
+    j["phase"], j["step"] = "queued", "Reprise…"
+    threading.Thread(target=run_ebook_job, args=(j, j["ctx"]), daemon=True).start()
+    return jsonify(job_id=jid)
 
 
 @app.post("/api/ebook/titles")

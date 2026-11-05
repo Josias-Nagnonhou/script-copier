@@ -218,6 +218,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .ttlsugg{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:10px}
 .tsug{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:9px 13px;font:700 14px var(--body);cursor:pointer;text-align:left;max-width:100%}
 .tsug:hover{border-color:var(--ink)}.tsug.on{background:var(--ink);color:var(--on-ink);border-color:var(--ink)}
+.ebresume{display:inline-block;margin-top:8px;padding:10px 16px}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
 .modes{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px;margin:-8px 0 26px;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
 .modes::-webkit-scrollbar{display:none}
@@ -442,10 +443,11 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           <div class="num">
             <label for="ebPages">Nombre de pages</label>
             <div class="numrow">
-              <input id="ebPages" class="numin" type="number" inputmode="numeric" min="10" max="100" step="1" value="30">
-              <div class="chips" id="ebChips"><button type="button" data-v="15">15</button><button type="button" data-v="30" class="on">30</button><button type="button" data-v="50">50</button><button type="button" data-v="80">80</button></div>
+              <input id="ebPages" class="numin" type="number" inputmode="numeric" min="5" step="1" value="30">
+              <div class="chips" id="ebChips"><button type="button" data-v="15">15</button><button type="button" data-v="30" class="on">30</button><button type="button" data-v="50">50</button><button type="button" data-v="100">100</button><button type="button" data-v="150">150</button></div>
             </div>
-            <p class="numerr" id="ebPagesErr" hidden>Choisis entre 10 et 100 pages.</p>
+            <p class="numerr" id="ebPagesErr" hidden>Indique au moins 5 pages.</p>
+            <p class="hint" id="ebEta"></p>
           </div>
         </div>
         <div class="ebcol">
@@ -964,8 +966,12 @@ $('#ebSugg').addEventListener('click',e=>{const b=e.target.closest('.tsug');if(!
   document.querySelectorAll('.tsug').forEach(x=>x.classList.toggle('on',x===b));
   ebKeep=true;document.querySelectorAll('#ebKeep button').forEach(x=>{const on=x.dataset.k==='1';x.classList.toggle('on',on);x.setAttribute('aria-checked',String(on))})});
 try{$('#ebAuthor').value=localStorage.getItem('ebAuthor')||'';$('#ebShop').value=localStorage.getItem('ebShop')||''}catch(e){}
-document.querySelectorAll('#ebChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#ebChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#ebPages').value=b.dataset.v;$('#ebPagesErr').hidden=true});
-$('#ebPages').oninput=()=>{$('#ebPagesErr').hidden=true;document.querySelectorAll('#ebChips button').forEach(x=>x.classList.toggle('on',x.dataset.v===$('#ebPages').value))};
+setTimeout(()=>{try{ebEta()}catch(e){}},0);
+document.querySelectorAll('#ebChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#ebChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#ebPages').value=b.dataset.v;$('#ebPagesErr').hidden=true;ebEta()});
+function ebEta(){const n=parseInt($('#ebPages').value,10)||0;if(n<5){$('#ebEta').textContent='';return}
+  const lo=Math.max(3,Math.round(n*.12)),hi=Math.max(6,Math.round(n*.3));
+  $('#ebEta').textContent=`Durée estimée : ${lo} à ${hi} min.`+(n>120?' Pour un livre aussi long, la limite gratuite de Groq du jour peut être atteinte en cours de route : tu pourras alors reprendre la création plus tard sans rien perdre.':'')}
+$('#ebPages').oninput=()=>{$('#ebPagesErr').hidden=true;ebEta();document.querySelectorAll('#ebChips button').forEach(x=>x.classList.toggle('on',x.dataset.v===$('#ebPages').value))};
 function ebOpen(prod){
   ebProduct=prod||null;
   $('#ebTitle').value=prod?prod.nom||'':'';$('#ebBrief').value='';$('#ebSugg').hidden=true;$('#ebSugg').innerHTML='';
@@ -982,7 +988,7 @@ function ebErr(m){$('#ebState').innerHTML=`<span class="err">${esc(m)}</span>`;e
 $('#ebGo').onclick=async()=>{
   if(ebBusy)return;
   const title=$('#ebTitle').value.trim();if(!title){$('#ebTitle').focus();return}
-  const pages=parseInt($('#ebPages').value,10);if(!(pages>=10&&pages<=100)){$('#ebPagesErr').hidden=false;$('#ebPages').focus();return}
+  const pages=parseInt($('#ebPages').value,10);if(!(pages>=5)){$('#ebPagesErr').hidden=false;$('#ebPages').focus();return}
   const author=$('#ebAuthor').value.trim(),shop=$('#ebShop').value.trim();
   try{localStorage.setItem('ebAuthor',author);localStorage.setItem('ebShop',shop)}catch(e){}
   const r=(aCur&&aCur.report)||{};
@@ -1003,7 +1009,10 @@ function ebWatch(id){
     $('#ebFill').style.width=Math.max(2,d.pct||0)+'%';$('#ebPct').textContent=Math.round(d.pct||0)+' %';
     if(!['done','error'].includes(d.phase)){$('#ebState').textContent=d.step||'Préparation…';return}
     clearInterval(ebTimer);ebSetBusy(false);
-    if(d.phase==='error'){ebErr(d.error);return}
+    if(d.phase==='error'){ebErr(d.error);
+      if(d.resumable){$('#ebState').insertAdjacentHTML('beforeend',' <button type="button" class="btn dl ebresume" id="ebResume">Reprendre la création</button>');
+        $('#ebResume').onclick=async()=>{try{const r=await fetch('/api/job/'+id+'/resume',{method:'POST'});const x=await r.json();if(!r.ok)throw new Error(x.error);ebWatch(id)}catch(e){ebErr(e.message)}}}
+      return}
     const info=await (await fetch('/api/job/'+id+'/ebook')).json();
     $('#ebProg').hidden=true;$('#ebDone').hidden=false;
     $('#ebCover').src='/api/job/'+id+'/ebook/cover';

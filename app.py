@@ -1,6 +1,6 @@
 """Kopi — récupère la transcription de plusieurs vidéos TikTok / YouTube
 et les rassemble dans un document Word (Script 1, Script 2, ...)."""
-import os, re, random, zipfile, json, time, uuid, glob, shutil, threading, tempfile, subprocess, datetime
+import os, re, random, zipfile, json, time, uuid, glob, shutil, threading, tempfile, subprocess, datetime, html
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -110,7 +110,7 @@ LOCK = threading.Lock()
 def ydl_opts(platform, **extra):
     o = {"quiet": True, "no_warnings": True, "noprogress": True,
          "socket_timeout": 30, "retries": 3}
-    ck = COOKIES.get("YT_COOKIES" if platform == "youtube" else "TT_COOKIES")
+    ck = COOKIES.get({"youtube": "YT_COOKIES", "tiktok": "TT_COOKIES"}.get(platform, ""))
     if ck:
         o["cookiefile"] = ck
     o.update(extra)
@@ -119,6 +119,12 @@ def ydl_opts(platform, **extra):
 
 def normalize_source(platform, raw, yt_tab):
     raw = raw.strip()
+    if platform == "facebook":
+        if raw.startswith("http"):
+            return re.sub(r"^https?://(?:m|mbasic|web|fr-fr|fr)\.facebook\.com", "https://www.facebook.com", raw)
+        if "facebook.com" in raw or "fb.com" in raw:
+            return "https://" + raw.lstrip("/")
+        return "https://www.facebook.com/" + raw.lstrip("@").strip().replace(" ", "")
     if platform == "tiktok":
         if raw.startswith("http"):
             return raw
@@ -1366,6 +1372,108 @@ def audit_listing(platform, url, limit):
     return meta, vids
 
 
+FB_LINK = re.compile(r"https?://(?:[\w-]+\.)?(?:facebook\.com|fb\.watch|fb\.com)/\S+")
+
+
+def _fb_num(s):
+    s = re.sub(r"^[^\d]+", "", (s or "").replace("\u202f", " ").replace("\xa0", " ")).strip().lower()
+    m = re.match(r"([\d\s.,]+)\s*([km]|mil|million)?", s)
+    if not m:
+        return 0
+    n = m.group(1).replace(" ", "")
+    mult = {"k": 1e3, "mil": 1e3, "m": 1e6, "million": 1e6}.get(m.group(2) or "", 1)
+    if mult > 1:
+        n = n.replace(",", ".")
+    else:
+        n = n.replace(",", "").replace(".", "")
+    try:
+        return int(float(n) * mult)
+    except ValueError:
+        return 0
+
+
+def fb_page_meta(url):
+    """Nom, abonnés et présentation de la page via les balises publiques (aperçu de lien)."""
+    meta = {"name": "", "followers": 0, "description": ""}
+    for ua in ("facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"):
+        try:
+            r = requests.get(url, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20)
+        except requests.RequestException:
+            continue
+        h = r.text
+        def og(p):
+            m = re.search(r'<meta[^>]+property="og:' + p + r'"[^>]+content="([^"]*)"', h) or \
+                re.search(r'<meta[^>]+content="([^"]*)"[^>]+property="og:' + p + r'"', h)
+            return html.unescape(m.group(1)).strip() if m else ""
+        title, desc = og("title"), og("description")
+        if title and title.lower() not in ("facebook", "log in or sign up to view", "connexion"):
+            meta["name"] = title
+        if desc:
+            meta["description"] = desc[:700]
+            for word in (r"(?:followers|abonnés|personnes suivent)", r"(?:J[’']aime|likes)"):
+                m = re.search(r"(\d[\d\s.,\u202f\xa0]*\s*(?:[kKmM]|mil|million)?)\s*" + word, desc)
+                if m:
+                    meta["followers"] = _fb_num(m.group(1))
+                    break
+        if meta["name"]:
+            break
+    return meta
+
+
+def fb_video_info(url):
+    with yt_dlp.YoutubeDL(ydl_opts("facebook", skip_download=True)) as y:
+        e = y.extract_info(url, download=False)
+    return {"url": e.get("webpage_url") or url, "title": (e.get("title") or e.get("description") or "").strip()[:200],
+            "views": e.get("view_count") or 0, "duration": e.get("duration") or 0,
+            "uploader": e.get("uploader") or e.get("channel") or ""}
+
+
+def facebook_listing(job):
+    """Page Facebook : infos publiques de la page + vidéos (onglets Vidéos/Reels si accessibles) + liens collés."""
+    url, limit = job["url"], job["limit"]
+    page = url.split("?")[0].rstrip("/")
+    is_page = not re.search(r"/(videos?|reel|watch|share|posts|story)/|fb\.watch", page)
+    if job["source"] == "Ma page Facebook":
+        is_page = False
+        url = ""
+    meta = fb_page_meta(page) if is_page else {"name": "", "followers": 0, "description": ""}
+    vids, seen = [], set()
+    if is_page:
+        for tab in ("/videos", "/reels"):
+            try:
+                opts = ydl_opts("facebook", extract_flat="in_playlist", skip_download=True, ignoreerrors=True, playlistend=limit)
+                with yt_dlp.YoutubeDL(opts) as y:
+                    info = y.extract_info(page + tab, download=False)
+                for e in (flatten(info) if info and info.get("entries") is not None else []):
+                    u = entry_url(e, "facebook")
+                    if u and u not in seen:
+                        seen.add(u)
+                        vids.append({"url": u, "title": (e.get("title") or e.get("description") or "").strip(),
+                                     "views": e.get("view_count") or 0, "duration": e.get("duration") or 0})
+            except Exception as e:
+                print(f"[analyse {job['id']}] Facebook {tab} : {str(e)[:120]}", flush=True)
+    links = list(dict.fromkeys(FB_LINK.findall(job.get("links") or "")))
+    if not is_page and url:
+        links.insert(0, url)
+    for k, u in enumerate(links[:15], 1):
+        job["step"] = f"Lecture de tes vidéos Facebook · {k}/{min(len(links), 15)}"
+        try:
+            v = fb_video_info(u)
+            if v["url"] not in seen:
+                seen.add(v["url"]); vids.append(v)
+                meta["name"] = meta["name"] or v["uploader"]
+        except Exception as e:
+            print(f"[analyse {job['id']}] vidéo Facebook illisible : {str(e)[:120]}", flush=True)
+    meta["name"] = meta["name"] or job["source"]
+    if job.get("about"):
+        meta["description"] = (meta["description"] + "\n" if meta["description"] else "") + job["about"][:1500]
+    if not vids and not job.get("about") and not meta["description"]:
+        raise RuntimeError("Facebook ne laisse pas lire cette page sans connexion. Colle 3 à 10 liens de tes vidéos ou "
+                           "reels publics (dans « Liens de tes meilleures vidéos ») et/ou décris ta page en 2-3 phrases, puis relance.")
+    return meta, vids[:limit]
+
+
 def audit_transcript(platform, url, lang, tmp):
     """Début du script d'une vidéo (sous-titres, sinon IA sur les 6 premières minutes)."""
     with yt_dlp.YoutubeDL(ydl_opts(platform, skip_download=True)) as y:
@@ -1418,14 +1526,20 @@ def fmt_num(n):
     return f"{n / 1e6:.1f} M".replace(".", ",") if n >= 1e6 else f"{n / 1e3:.0f} k" if n >= 1e4 else str(n)
 
 
+PLAT_NAME = {"youtube": "YouTube", "tiktok": "TikTok", "facebook": "Facebook"}
+
+
 def run_audit_job(job):
     print(f"[analyse {job['id']}] {job['src_platform']} {job['url']} ({job['limit']} vidéos, approfondie={job['deep']})", flush=True)
     tmp = tempfile.mkdtemp(dir=BASE)
     try:
         job["phase"] = "listing"
         job["step"], job["pct"] = "Lecture des vidéos de la chaîne…", 5
-        meta, vids = audit_listing(job["src_platform"], job["url"], job["limit"])
-        if not vids:
+        if job["src_platform"] == "facebook":
+            meta, vids = facebook_listing(job)
+        else:
+            meta, vids = audit_listing(job["src_platform"], job["url"], job["limit"])
+        if not vids and job["src_platform"] != "facebook":
             raise RuntimeError("Aucune vidéo trouvée sur cette chaîne ou ce compte.")
         job["source_name"] = meta["name"]
         job["phase"] = "transcribing"
@@ -1460,13 +1574,17 @@ def run_audit_job(job):
         job["step"], job["pct"] = "Analyse de l'audience par l'IA…", 78
         lines = [f"{v['title'][:110]} | {fmt_num(v['views']) + ' vues' if v['views'] else 'vues inconnues'}"
                  + (f" | {int(v['duration'] // 60)} min" if v["duration"] else "") for v in (by_views if has_views else vids)[:45]]
-        data = [f"PLATEFORME : {'YouTube' if job['src_platform'] == 'youtube' else 'TikTok'}",
+        data = [f"PLATEFORME : {PLAT_NAME.get(job['src_platform'], 'TikTok')}",
                 f"NOM : {meta['name']}",
                 f"ABONNÉS : {fmt_num(meta['followers']) if meta['followers'] else 'inconnu'}",
                 f"VUES MOYENNES : {fmt_num(stats['moyenne_vues']) if stats['moyenne_vues'] else 'inconnues'}"]
         if meta["description"]:
-            data.append(f"DESCRIPTION DE LA CHAÎNE : {meta['description']}")
-        data.append(f"\nVIDÉOS ({len(lines)} sur {len(vids)} analysées, classées par vues décroissantes) :\n" + "\n".join(lines))
+            data.append(f"DESCRIPTION DE LA CHAÎNE / PAGE : {meta['description']}")
+        if not lines:
+            data.append("\n(Aucune vidéo lisible publiquement : appuie-toi sur la description de la page fournie par le créateur, "
+                        "sans inventer de chiffres ni de titres.)")
+        else:
+            data.append(f"\nVIDÉOS ({len(lines)} sur {len(vids)} analysées, classées par vues décroissantes) :\n" + "\n".join(lines))
         if scripts:
             data.append("\nDÉBUT DES SCRIPTS DES VIDÉOS LES PLUS VUES :\n" + "\n\n".join(f"« {t[:90]} » : {x}" for t, x in scripts))
         if comments:
@@ -1516,7 +1634,7 @@ def build_audit_docx(job, path):
     doc.add_heading(f"Monétisation — {job['source_name']}", 0)
     meta = doc.add_paragraph()
     src = r.get("_sources", {})
-    m = meta.add_run(f"{'YouTube' if job['src_platform'] == 'youtube' else 'TikTok'} · {src.get('videos', 0)} vidéos, "
+    m = meta.add_run(f"{PLAT_NAME.get(job['src_platform'], 'TikTok')} · {src.get('videos', 0)} vidéos, "
                      f"{src.get('scripts', 0)} scripts, {src.get('commentaires', 0)} commentaires analysés · "
                      f"{datetime.datetime.now().strftime('%d/%m/%Y')}")
     m.font.color.rgb, m.font.size = RGBColor(0x66, 0x66, 0x66), Pt(10)
@@ -1595,10 +1713,14 @@ def start_audit():
         return jsonify(error="La clé Groq n'est pas configurée : l'analyse est impossible."), 400
     cleanup()
     d = request.get_json(force=True)
-    platform = "tiktok" if d.get("platform") == "tiktok" else "youtube"
+    platform = d.get("platform") if d.get("platform") in ("tiktok", "facebook") else "youtube"
     raw = (d.get("source") or "").strip()
+    links, about = (d.get("links") or "").strip()[:6000], (d.get("about") or "").strip()[:1500]
+    if not raw and platform == "facebook":
+        first = FB_LINK.search(links)
+        raw = first.group(0) if first else ("Ma page Facebook" if about else "")
     if not raw:
-        return jsonify(error="Colle le lien ou le nom de ta chaîne ou de ton compte."), 400
+        return jsonify(error="Colle le lien ou le nom de ta chaîne, de ton compte ou de ta page."), 400
     if any(j["platform"] == "audit" and j["phase"] in ("queued", "listing", "transcribing") for j in JOBS.values()):
         return jsonify(error="Une analyse est déjà en cours. Attends qu'elle se termine."), 409
     try:
@@ -1608,6 +1730,7 @@ def start_audit():
     job = {"id": uuid.uuid4().hex[:12], "platform": "audit", "src_platform": platform, "source": raw,
            "url": normalize_source(platform, raw, "videos"), "limit": limit, "deep": bool(d.get("deep", True)),
            "lang": (d.get("lang") or "").strip()[:5], "phase": "queued", "items": [], "source_name": raw,
+           "links": links, "about": about,
            "error": "", "created": time.time(), "step": "En attente…", "pct": 0}
     with LOCK:
         JOBS[job["id"]] = job

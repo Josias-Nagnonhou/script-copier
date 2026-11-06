@@ -265,6 +265,9 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .ebacts .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.22);color:inherit;padding:9px 14px;border-radius:999px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .ebacts .btn.ghost:hover{border-color:#d7ff3a;color:#d7ff3a}
 .ebacts .btn.ghost[disabled]{opacity:.5;cursor:wait}
+#aFb textarea{width:100%;box-sizing:border-box;border:2px solid var(--line,#e5e2da);border-radius:14px;padding:12px 14px;font:inherit;font-size:15px;line-height:1.45;background:var(--card,#fff);color:inherit;resize:vertical;margin:6px 0 14px}
+#aFb textarea:focus{outline:none;border-color:#111}
+#aFb label small{font-weight:500;opacity:.7}
 </style>
 </head>
 <body>
@@ -407,14 +410,22 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
         <div class="seg" id="aPlat">
           <button data-p="youtube" class="on">YouTube</button>
           <button data-p="tiktok">TikTok</button>
+          <button data-p="facebook">Facebook</button>
         </div>
-        <label for="aSource">Lien ou nom de ta chaîne / ton compte</label>
+        <label for="aSource" id="aSrcLab">Lien ou nom de ta chaîne / ton compte</label>
         <input id="aSource" class="bigin" placeholder="@nomdelachaine ou https://www.youtube.com/@..." autocomplete="off">
         <div class="num">
           <label>Vidéos à analyser</label>
           <div class="chips" id="aChips">
             <button type="button" data-v="20">20</button><button type="button" data-v="40" class="on">40</button><button type="button" data-v="80">80</button><button type="button" data-v="150">150</button>
           </div>
+        </div>
+        <div id="aFb" hidden>
+          <label for="aLinks">Liens de tes meilleures vidéos ou reels Facebook <small>(conseillé · un par ligne)</small></label>
+          <textarea id="aLinks" rows="4" placeholder="https://www.facebook.com/reel/...&#10;https://www.facebook.com/watch/?v=...&#10;https://fb.watch/..."></textarea>
+          <label for="aAbout">Décris ta page en quelques phrases <small>(facultatif mais très utile)</small></label>
+          <textarea id="aAbout" rows="3" placeholder="Ex. : page de conseils de couple, 45 000 abonnés, surtout des femmes de 25-40 ans en Côte d'Ivoire et au Bénin. Mes posts qui marchent le plus : les vidéos sur la jalousie et la confiance."></textarea>
+          <p class="hint">Facebook cache beaucoup d'informations aux outils. Kopi lit ce qui est public sur ta page ; avec tes liens de vidéos et ta description, l'analyse est bien plus précise.</p>
         </div>
         <label class="acheck"><input type="checkbox" id="aDeep" checked> <span><b>Analyse approfondie</b> · lit aussi les scripts des 5 vidéos les plus vues et, sur YouTube, les commentaires les plus aimés (plus précis, 2 à 5 min)</span></label>
         <button class="go" id="aGo">Analyser mon audience →</button>
@@ -897,7 +908,8 @@ $('#lb').addEventListener('touchend',e=>{if(lbX===null)return;const dx=e.changed
 /* ---------- monétisation ---------- */
 let aPlat='youtube',aLimit=40,aTimer=null,aBusy=false,aCur=null;
 document.querySelectorAll('#aPlat button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aPlat button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aPlat=b.dataset.p;
-  $('#aSource').placeholder=aPlat==='tiktok'?'@nomducompte ou https://www.tiktok.com/@...':'@nomdelachaine ou https://www.youtube.com/@...'});
+  $('#aSource').placeholder=aPlat==='tiktok'?'@nomducompte ou https://www.tiktok.com/@...':aPlat==='facebook'?'https://www.facebook.com/tapage ou nom de la page':'@nomdelachaine ou https://www.youtube.com/@...';
+  $('#aFb').hidden=aPlat!=='facebook';$('#aSrcLab').textContent=aPlat==='facebook'?'Lien ou nom de ta page Facebook':'Lien ou nom de ta chaîne / ton compte'});
 document.querySelectorAll('#aChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aLimit=+b.dataset.v});
 function aSetBusy(on){aBusy=on;$('#aGo').classList.toggle('busy',on);$('#aGo').textContent=on?'Kopi analyse…':'Analyser mon audience →';$('#aBar').classList.toggle('live',on)}
 function aProg(p){$('#aPct').textContent=Math.round(p);$('#aFill').style.width=p+'%'}
@@ -946,9 +958,10 @@ function aRender(d){
 }
 $('#aGo').onclick=async()=>{
   if(aBusy)return;
-  const source=$('#aSource').value.trim();if(!source){$('#aSource').focus();return}
+  const source=$('#aSource').value.trim(),fb=aPlat==='facebook',links=fb?$('#aLinks').value.trim():'',about=fb?$('#aAbout').value.trim():'';
+  if(!source&&!(fb&&(links||about))){$('#aSource').focus();return}
   aSetBusy(true);aProg(0);$('#aDl').setAttribute('aria-disabled','true');
-  try{const r=await fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:aPlat,source,limit:aLimit,deep:$('#aDeep').checked,lang:''})});
+  try{const r=await fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:aPlat,source,links,about,limit:aLimit,deep:$('#aDeep').checked,lang:''})});
     const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('auJob',d.job_id)}catch(e){}aWatch(d.job_id)}
   catch(e){aErr(e.message)}
 };

@@ -1432,7 +1432,8 @@ def fb_video_info(url):
 def facebook_listing(job):
     """Page Facebook : infos publiques de la page + vidéos (onglets Vidéos/Reels si accessibles) + liens collés."""
     url, limit = job["url"], job["limit"]
-    page = url.split("?")[0].rstrip("/")
+    pid = re.search(r"[?&]id=(\d+)", url)
+    page = f"https://www.facebook.com/profile.php?id={pid.group(1)}" if pid else url.split("?")[0].rstrip("/")
     is_page = not re.search(r"/(videos?|reel|watch|share|posts|story)/|fb\.watch", page)
     if job["source"] == "Ma page Facebook":
         is_page = False
@@ -1440,7 +1441,7 @@ def facebook_listing(job):
     meta = fb_page_meta(page) if is_page else {"name": "", "followers": 0, "description": ""}
     vids, seen = [], set()
     if is_page:
-        for tab in ("/videos", "/reels"):
+        for tab in (("&sk=videos", "&sk=reels_tab") if pid else ("/videos", "/reels")):
             try:
                 opts = ydl_opts("facebook", extract_flat="in_playlist", skip_download=True, ignoreerrors=True, playlistend=limit)
                 with yt_dlp.YoutubeDL(opts) as y:
@@ -1469,8 +1470,9 @@ def facebook_listing(job):
     if job.get("about"):
         meta["description"] = (meta["description"] + "\n" if meta["description"] else "") + job["about"][:1500]
     if not vids and not job.get("about") and not meta["description"]:
-        raise RuntimeError("Facebook ne laisse pas lire cette page sans connexion. Colle 3 à 10 liens de tes vidéos ou "
-                           "reels publics (dans « Liens de tes meilleures vidéos ») et/ou décris ta page en 2-3 phrases, puis relance.")
+        raise RuntimeError("Facebook bloque la lecture automatique de cette page. Pour que l'analyse marche : colle 3 à 10 liens "
+                           "de tes vidéos ou reels publics dans « Liens de tes meilleures vidéos » (sur ta vidéo : Partager → Copier le lien), "
+                           "et/ou écris 2-3 phrases dans « Décris ta page », puis relance.")
     return meta, vids[:limit]
 
 

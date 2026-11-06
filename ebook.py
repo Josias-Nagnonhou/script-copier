@@ -221,9 +221,30 @@ def tidy_md(md):
     return re.sub(r"\n{3,}", "\n\n", md).strip()
 
 
+def de_loop(t, cap=1800):
+    """Coupe les répétitions en boucle de l'IA (« perle noire, perle blanche, perle noire, … ») et les lignes géantes."""
+    if len(t) < 600:
+        return t
+    parts = re.split(r"(?<=[,;])\s+", t)
+    out, seen = [], set()
+    for k, p in enumerate(parts):
+        key = " ".join(x.strip().lower() for x in parts[k:k + 3])
+        if k >= 3 and key in seen:
+            out[-1] = out[-1].rstrip(",; ") + "…"
+            break
+        seen.add(key)
+        out.append(p)
+    t = " ".join(out)
+    if len(t) > cap:
+        cut = t[:cap]
+        end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        t = cut[:end + 1] if end > cap * .5 else cut.rsplit(" ", 1)[0] + "…"
+    return t
+
+
 def inline(t):
     """Markdown en ligne → balises ReportLab (après échappement)."""
-    t = clean(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    t = de_loop(clean(t)).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
     t = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<i>\1</i>", t)
     t = re.sub(r"__(.+?)__", r"<b>\1</b>", t)
@@ -1190,6 +1211,10 @@ def _build_pdf(book, path):
     def bullets(items, numbered=False, check=False, inner_w=None, style=None, on_dark=False):
         w = inner_w or CW
         li = style or st["li"]
+        if SAFE["on"]:
+            sty = ParagraphStyle("lisafe", parent=li, leftIndent=14, bulletIndent=0)
+            return [Paragraph(inline(it), sty, bulletText=(f"{k}." if numbered else "•"))
+                    for k, it in enumerate(items, 1)] + [Spacer(1, 6)]
         mcol = ACC if on_dark else MAIN
         rows = []
         for k, it in enumerate(items, 1):

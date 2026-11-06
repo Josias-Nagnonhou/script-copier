@@ -2638,7 +2638,10 @@ def find_moments(job, words, ends, lines):
                 raise
             print(f"[clip {job['id']}] analyse {k} ratée : {e}", flush=True)
             continue
-        for c in (parse_json_obj(out).get("clips") or [])[:6]:
+        got = parse_json_obj(out).get("clips") or []
+        if not got:
+            print(f"[clip {job['id']}] partie {k} : aucun clip proposé ({len(out or '')} car. : {(out or '')[:160]!r})", flush=True)
+        for c in got[:6]:
             try:
                 ld, lf, score = int(c.get("debut")), int(c.get("fin")), int(float(c.get("score") or 0))
             except (TypeError, ValueError):
@@ -2915,6 +2918,7 @@ def run_clip_job(job):
         job["phase"] = "analyzing"
         moments = find_moments(job, words, ends, lines)
         if not moments:
+            print(f"[clip {job['id']}] {len(words)} mots, {len(lines)} lignes, {job.get('parts')} parties analysées, méthode {job.get('method')}", flush=True)
             raise RuntimeError("L'IA n'a trouvé aucun passage assez fort dans cette vidéo. Essaie une autre durée de clip.")
         for n, m in enumerate(moments, 1):
             m.update(n=n, status="pending", msg="", size=0, file="")

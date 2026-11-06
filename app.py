@@ -2375,7 +2375,25 @@ CLIP_LENGTHS = {"auto": (20, 90), "court": (15, 35), "moyen": (30, 60), "long": 
 AUTO_MIN_SCORE, AUTO_MAX = 75, 15
 CLIP_W, CLIP_H = 720, 1280
 FONTS_DIR = os.path.join(app.root_path, "fonts")
-FF_THREADS = os.environ.get("FFMPEG_THREADS", "2")
+def _cpu_quota():
+    """Part de processeur accordée par l'hébergeur (0,1 sur le plan gratuit de Render)."""
+    try:
+        q, p = open("/sys/fs/cgroup/cpu.max").read().split()[:2]
+        return 99.0 if q == "max" else int(q) / int(p)
+    except Exception:
+        pass
+    try:
+        q = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())
+        p = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+        return 99.0 if q <= 0 else q / p
+    except Exception:
+        return 0.1 if os.environ.get("RENDER") and not os.environ.get("CLIP_HD") else 99.0
+
+
+CPU_QUOTA = _cpu_quota()
+LIGHT = CPU_QUOTA < 0.6 and os.environ.get("CLIP_HD") != "1"  # petit serveur : montage allégé
+FF_THREADS = os.environ.get("FFMPEG_THREADS", "1" if LIGHT else "2")
+print(f"Processeur : {CPU_QUOTA:.2f} · montage {'allégé' if LIGHT else 'HD'}", flush=True)
 WINDOW, STEP = 600, 510  # analyse par tranches de 10 min qui se chevauchent
 
 
@@ -2721,7 +2739,7 @@ def clip_ass(words, m, job, path):
 
 
 def clip_sources(job):
-    h = 720 if job["style"] == "blur" else 1080  # recadrage : source en 1080p pour garder une image nette
+    h = 720 if job["style"] == "blur" or LIGHT else 1080  # recadrage : 1080p si le serveur est assez puissant
     fmt = (f"bv*[height<={h}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<={h}][vcodec^=avc1]+ba/"
            f"bv*[height<={h}]+ba/b[height<={h}]/b")
     with yt_dlp.YoutubeDL(ydl_opts(job["site"], format=fmt, skip_download=True)) as y:
@@ -2873,7 +2891,7 @@ def render_clip(job, m, path, src_info):
             cw, keys, seen = int(vh * 9 / 16) // 2 * 2, [(0.0, (vw - int(vh * 9 / 16) // 2 * 2) / 2, 0.0)], 0
         print(f"[clip {job['id']}] clip {m['n']} : {seen} images avec visage, {len(keys)} positions de cadre", flush=True)
         m["msg"] = "Montage…"
-        fc = (f"[0:v]crop={cw}:{vh}:x='{x_expr(keys)}':y=0,scale={W}:{H}:flags=lanczos,setsar=1,fps=30")
+        fc = (f"[0:v]crop={cw}:{vh}:x='{x_expr(keys)}':y=0,scale={W}:{H}:flags={'bicubic' if LIGHT else 'lanczos'},setsar=1,fps=30")
     else:  # vidéo déjà verticale (ou taille inconnue) : on remplit l'écran
         fc = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps=30"
     fc += f",ass=filename={ass}:fontsdir={FONTS_DIR},format=yuv420p[v]"
@@ -2882,7 +2900,8 @@ def render_clip(job, m, path, src_info):
         cmd += ff_input(u, hd, m["s"], d)
     audio = "1:a:0" if len(srcs) > 1 else "0:a:0?"
     cmd += ["-filter_complex", fc, "-map", "[v]", "-map", audio,
-            "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:v", "libx264", "-preset", "superfast" if LIGHT else "veryfast", "-crf", "23" if LIGHT else "22",
+            *(["-x264-params", "rc-lookahead=8:ref=1"] if LIGHT else []),
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-movflags", "+faststart",
             "-threads", FF_THREADS, "-t", f"{d:.3f}", path]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)

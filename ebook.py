@@ -464,7 +464,16 @@ def cover_size(uni):
             "card": (1024, 960), "magazine": (1152, 976)}[STYLES[uni]["cover"]]
 
 
+DOWN = {}  # service d'images en panne ou payant → on ne le réessaie pas avant cette heure
+
+
+def _down(name):
+    return time.time() < DOWN.get(name, 0)
+
+
 def fetch_image(prompt, w, h, seed, path, log=print, uni="moderne"):
+    if _down("pollinations"):
+        return False
     style = ", " + STYLES.get(uni, STYLES["moderne"])["img"]
     url = ("https://image.pollinations.ai/prompt/" + urllib.parse.quote(clean(prompt)[:500] + style + IMG_STYLE, safe="")
            + f"?width={w}&height={h}&seed={seed}&nologo=true&model=flux&private=true")
@@ -477,8 +486,16 @@ def fetch_image(prompt, w, h, seed, path, log=print, uni="moderne"):
                     im.save(path, "JPEG", quality=86, optimize=True)
                     return True
             log(f"[ebook] image refusée ({r.status_code}, {len(r.content)} o)")
+            if r.status_code in (401, 402, 403):
+                DOWN["pollinations"] = time.time() + 3 * 3600
+                log("[ebook] Pollinations payant : ignoré pendant 3 h")
+                return False
         except Exception as e:
             log(f"[ebook] image en échec : {type(e).__name__} {str(e)[:80]}")
+            if "Timeout" in type(e).__name__:
+                DOWN["pollinations"] = time.time() + 3600
+                log("[ebook] Pollinations trop lent : ignoré pendant 1 h")
+                return False
         time.sleep(6 + attempt * 6)
     return False
 
@@ -521,8 +538,11 @@ def fetch_gemini(prompt, w, h, path, key, log=print, uni="moderne", size="2K"):
     style = STYLES.get(uni, STYLES["moderne"])["img"]
     full = (f"{clean(prompt)[:700]}. Style: {style}. Photorealistic or high-end editorial illustration, beautiful composition, "
             "professional book cover art quality, any people shown are Black African, no text, no letters, no words, no logo, no watermark.")
+    if _down("gemini_img"):
+        return False
     aspect = nearest_aspect(w, h)
     hdr = {"x-goog-api-key": key, "Content-Type": "application/json"}
+    zero = 0
     for model in GEMINI_MODELS:
         attempts = (
             ("https://generativelanguage.googleapis.com/v1beta/interactions",
@@ -551,6 +571,11 @@ def fetch_gemini(prompt, w, h, path, key, log=print, uni="moderne", size="2K"):
                 return False
             else:
                 log(f"[ebook] Gemini {model} {url.rsplit('/', 1)[-1][:20]} : {r.status_code} {r.text[:140]}")
+                if r.status_code == 429 and "limit: 0" in r.text:
+                    zero += 1
+    if zero:
+        DOWN["gemini_img"] = time.time() + 6 * 3600
+        log("[ebook] Images Google indisponibles sur l'offre gratuite : ignorées pendant 6 h")
     return False
 
 
@@ -841,7 +866,27 @@ class Doc(BaseDocTemplate):
 ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV", "XV"]
 
 
+SAFE = {"on": False}
+
+
 def build_pdf(book, path):
+    """Construit le PDF ; si un bloc refuse de tenir dans la page, on recommence en mode « sécurité »
+    (encadrés et citations en texte simple) plutôt que de perdre le livre."""
+    try:
+        SAFE["on"] = False
+        return _build_pdf(book, path)
+    except Exception as e:
+        if "too large" not in str(e) and "Flowable" not in str(e) and "LayoutError" not in type(e).__name__:
+            raise
+        print(f"[ebook] mise en page : un bloc ne tient pas dans la page, reconstruction en mode sécurité ({str(e)[:100]})", flush=True)
+        SAFE["on"] = True
+        try:
+            return _build_pdf(book, path)
+        finally:
+            SAFE["on"] = False
+
+
+def _build_pdf(book, path):
     register_fonts()
     uni = book.get("univers") if book.get("univers") in STYLES else "moderne"
     S = STYLES[uni]
@@ -1070,6 +1115,22 @@ def build_pdf(book, path):
                           PageTemplate("dark", [Frame(M, 2.1 * cm, CW, H - 4.3 * cm, id="d")], onPage=on_dark)])
 
     # ================================================================ blocs de texte
+    def boxed(inner, cmds, bar_w=None, pad=(12, 10)):
+        """Encadré dont chaque élément est une ligne : il peut se couper sur deux pages au lieu de bloquer le PDF."""
+        if SAFE["on"]:
+            return inner
+        if bar_w:
+            rows = [["", x] for x in inner]
+            t = Table(rows, colWidths=[bar_w, CW - bar_w])
+        else:
+            rows = [[x] for x in inner]
+            t = Table(rows, colWidths=[CW])
+        c = 1 if bar_w else 0
+        n = len(rows)
+        t.setStyle(TableStyle(cmds + [("TOPPADDING", (c, 0), (c, -1), 1), ("BOTTOMPADDING", (c, 0), (c, -1), 1),
+                                      ("TOPPADDING", (c, 0), (c, 0), pad[0]), ("BOTTOMPADDING", (c, n - 1), (c, n - 1), pad[1])]))
+        return t
+
     def callout(kind, ttl, body_blocks):
         label = CALLOUTS.get(kind, "Astuce")
         warn = kind == "attention"
@@ -1080,11 +1141,13 @@ def build_pdf(book, path):
             inner = [Paragraph(up(label) + (f" · {up(inline(ttl))}" if ttl else ""), lab)]
             for b in body_blocks:
                 inner += render(b, bod, inner_w=CW - 1.2 * cm, on_dark=True)
-            t = Table([[inner]], colWidths=[CW])
-            t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#B3261E") if warn else colors.HexColor("#141414")),
-                                   ("LEFTPADDING", (0, 0), (-1, -1), 16), ("RIGHTPADDING", (0, 0), (-1, -1), 16),
-                                   ("TOPPADDING", (0, 0), (-1, -1), 12), ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-                                   ("LINEBEFORE", (0, 0), (0, -1), 5, MAIN if not warn else ACC)]))
+            t = boxed(inner, [("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#B3261E") if warn else colors.HexColor("#141414")),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 16), ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+                              ("LINEBEFORE", (0, 0), (0, -1), 5, MAIN if not warn else ACC)])
+            if SAFE["on"]:
+                inner[0] = Paragraph(up(label) + (f" · {up(inline(ttl))}" if ttl else ""), st["ctl"])
+                inner[1:] = [f for b in body_blocks for f in render(b, st["cbody"], inner_w=CW)]
+                return [Spacer(1, 6)] + inner + [Spacer(1, 10)]
             return [Spacer(1, 6), t, Spacer(1, 10)]
         if style in ("frame", "rule"):
             centered = style == "frame"
@@ -1094,27 +1157,23 @@ def build_pdf(book, path):
             inner = ([Ornament(CW - 1.6 * cm, ACC, 40)] if centered else []) + [Paragraph(head, lab)]
             for b in body_blocks:
                 inner += render(b, st["cbody"], inner_w=CW - 1.6 * cm)
-            t = Table([[inner]], colWidths=[CW])
-            sty = [("LEFTPADDING", (0, 0), (-1, -1), 18), ("RIGHTPADDING", (0, 0), (-1, -1), 18),
-                   ("TOPPADDING", (0, 0), (-1, -1), 12), ("BOTTOMPADDING", (0, 0), (-1, -1), 10)]
+            sty = [("LEFTPADDING", (0, 0), (-1, -1), 18), ("RIGHTPADDING", (0, 0), (-1, -1), 18)]
             if centered:
                 sty += [("BOX", (0, 0), (-1, -1), .8, ACC), ("BACKGROUND", (0, 0), (-1, -1), LIGHT)]
             else:
                 sty += [("LINEABOVE", (0, 0), (-1, 0), 1.6, MAIN), ("LINEBELOW", (0, -1), (-1, -1), .6, MAIN),
                         ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]
-            t.setStyle(TableStyle(sty))
-            return [Spacer(1, 6), t, Spacer(1, 10)]
+            t = boxed(inner, sty)
+            return [Spacer(1, 6)] + (t if isinstance(t, list) else [t]) + [Spacer(1, 10)]
         if style == "soft":
             inner = [Paragraph(label.upper() + (f" · {inline(ttl)}" if ttl else ""),
                                ParagraphStyle("cl", parent=st["ctl"], textColor=colors.HexColor("#B3261E") if warn else MAIN))]
             for b in body_blocks:
                 inner += render(b, st["cbody"], inner_w=CW - 1.4 * cm)
-            t = Table([[inner]], colWidths=[CW])
-            t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FDECEA") if warn else LIGHT),
-                                   ("ROUNDEDCORNERS", [14, 14, 14, 14]), ("LEFTPADDING", (0, 0), (-1, -1), 16),
-                                   ("RIGHTPADDING", (0, 0), (-1, -1), 16), ("TOPPADDING", (0, 0), (-1, -1), 12),
-                                   ("BOTTOMPADDING", (0, 0), (-1, -1), 10)]))
-            return [Spacer(1, 6), t, Spacer(1, 10)]
+            t = boxed(inner, [("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FDECEA") if warn else LIGHT),
+                              ("ROUNDEDCORNERS", [14, 14, 14, 14]), ("LEFTPADDING", (0, 0), (-1, -1), 16),
+                              ("RIGHTPADDING", (0, 0), (-1, -1), 16)])
+            return [Spacer(1, 6)] + (t if isinstance(t, list) else [t]) + [Spacer(1, 10)]
         # bar (moderne)
         inner = [Paragraph(label.upper() + (f" · {inline(ttl)}" if ttl else ""), st["ctl"])]
         for b in body_blocks:
@@ -1122,13 +1181,11 @@ def build_pdf(book, path):
         bg = {"attention": colors.HexColor("#FDEDEA"), "exercice": colors.HexColor("#F3F1EC"),
               "action": colors.HexColor("#F3F1EC")}.get(kind, LIGHT)
         bar = colors.HexColor("#C8372D") if warn else ACC if kind in ("exercice", "action") else MAIN
-        t = Table([["", inner]], colWidths=[.18 * cm, CW - .18 * cm])
-        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, 0), bar), ("BACKGROUND", (1, 0), (1, 0), bg),
-                               ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (1, 0), (1, 0), 14),
-                               ("RIGHTPADDING", (1, 0), (1, 0), 14), ("TOPPADDING", (1, 0), (1, 0), 11),
-                               ("BOTTOMPADDING", (1, 0), (1, 0), 9), ("LEFTPADDING", (0, 0), (0, 0), 0),
-                               ("RIGHTPADDING", (0, 0), (0, 0), 0)]))
-        return [Spacer(1, 5), t, Spacer(1, 9)]
+        t = boxed(inner, [("BACKGROUND", (0, 0), (0, -1), bar), ("BACKGROUND", (1, 0), (1, -1), bg),
+                          ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (1, 0), (1, -1), 14),
+                          ("RIGHTPADDING", (1, 0), (1, -1), 14), ("LEFTPADDING", (0, 0), (0, -1), 0),
+                          ("RIGHTPADDING", (0, 0), (0, -1), 0)], bar_w=.18 * cm, pad=(11, 9))
+        return [Spacer(1, 5)] + (t if isinstance(t, list) else [t]) + [Spacer(1, 9)]
 
     def bullets(items, numbered=False, check=False, inner_w=None, style=None, on_dark=False):
         w = inner_w or CW
@@ -1177,6 +1234,8 @@ def build_pdf(book, path):
                                                                                     textColor=colors.HexColor("#111111"), spaceBefore=4)))
                 return [Spacer(1, 8)] + inner + [Spacer(1, 12)]
             inner = [Paragraph(q, st["quote"])] + ([Paragraph(inline(b["src"]), st["qsrc"])] if b.get("src") else [])
+            if SAFE["on"]:
+                return [Spacer(1, 6)] + inner + [Spacer(1, 10)]
             tb = Table([["", inner]] if qs == "bar" else [[inner]],
                        colWidths=[.12 * cm, (inner_w or CW) - .12 * cm] if qs == "bar" else [inner_w or CW])
             sty = ([("BACKGROUND", (0, 0), (0, 0), ACC), ("LEFTPADDING", (1, 0), (1, 0), 16), ("LEFTPADDING", (0, 0), (0, 0), 0),

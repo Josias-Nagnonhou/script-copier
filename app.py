@@ -2144,7 +2144,7 @@ def gen_sales_copy(meta, about=""):
     facts = [f"Titre : {meta.get('title')}", f"Sous-titre : {meta.get('subtitle') or ''}",
              f"Pour qui : {meta.get('pour_qui') or a.get('profil') or ''}",
              f"Niche : {meta.get('niche') or ''}",
-             f"Nombre de pages : {meta.get('pages') or 'non précisé'}",
+             f"Nombre de pages : {meta.get('page_count') or ''}",
              "Bénéfices : " + " ; ".join(meta.get("benefits") or []),
              "Chapitres : " + " | ".join(meta.get("toc") or []),
              "Douleurs de l'audience : " + " ; ".join(meta.get("douleurs") or []),
@@ -2173,6 +2173,9 @@ def gen_sales_copy(meta, about=""):
         "le bénéfice (jamais une phrase entière, jamais deux gras collés).\n"
         "- Émojis : 4 à 6 MAXIMUM dans toute la description, placés avec goût (par exemple un au début, un ou deux dans le "
         "corps, un près de l'appel à l'action). Jamais deux émojis dans la même ligne.\n"
+        "- Majuscule au début de chaque phrase, de chaque intertitre et de chaque point de liste (comme en français normal).\n"
+        "- Nombre de pages : écris-le UNIQUEMENT s'il est donné dans les informations, exactement ce nombre. S'il n'est pas "
+        "donné, ne parle jamais d'un nombre de pages.\n"
         "- Honnêteté : pas de faux avis, pas de chiffres ou de résultats inventés, pas de garantie, pas de fausse urgence, "
         "pas de remboursement promis. Tu n'inventes aucun contenu du livre : tu t'appuies sur les chapitres fournis.")
     user = ("Écris la description de vente de cet ebook.\n" + "\n".join(facts) + "\n\n"
@@ -2180,8 +2183,8 @@ def gen_sales_copy(meta, about=""):
             "caractères)\", \"accroche\": \"1 phrase pour les réseaux sociaux, qui sonne humain (max 95 caractères)\", "
             "\"points_forts\": [\"3 bénéfices très courts (max 42 caractères chacun) pour le visuel\"], "
             "\"description\": \"entre 600 et 850 mots, paragraphes de 1 à 3 phrases séparés par une ligne vide. "
-            "Déroulé (sans numéroter, avec des intertitres courts et naturels écrits en **gras**, en minuscules normales, "
-            "par exemple **Ce que tu vas trouver dedans**) : "
+            "Déroulé (sans numéroter, avec des intertitres courts et naturels écrits en **gras**, "
+            "avec une majuscule au début, par exemple **Ce que tu vas trouver dedans**) : "
             "une ouverture qui accroche comme une conversation (une scène du quotidien ou une question qui pique) ; "
             "3 ou 4 situations où le lecteur se reconnaît, en petite liste avec « • » ; "
             "ce que ça coûte de rester comme ça, avec empathie, sans dramatiser ; "
@@ -2189,7 +2192,7 @@ def gen_sales_copy(meta, about=""):
             "ce qu'on trouve dedans : 6 à 8 points en liste « • », chacun un bénéfice concret tiré des chapitres, "
             "avec 1 ou 2 mots en gras par point ; "
             "pour qui c'est fait, et honnêtement pour qui ce n'est pas fait ; "
-            "ce qu'on reçoit (PDF lisible sur téléphone, tablette et ordinateur, nombre de pages si connu, accès dès le "
+            "ce qu'on reçoit (PDF lisible sur téléphone, tablette et ordinateur, le nombre de pages SEULEMENT s'il est fourni, accès dès le "
             "paiement) ; "
             "2 ou 3 questions qu'on se pose avant d'acheter, avec des réponses franches ; "
             "une fin chaleureuse qui invite à passer à l'action, avec le prix s'il est connu, comme un ami qui te pousse "
@@ -2198,8 +2201,27 @@ def gen_sales_copy(meta, about=""):
                     max_tokens=6000, json_mode=True, tag="kit")
     out = parse_json_loose(raw)
     out["points_forts"] = [p.strip()[:48] for p in (out.get("points_forts") or []) if isinstance(p, str) and p.strip()][:3]
-    out["description"] = tidy_copy((out.get("description") or "").replace("\\n", "\n"))
+    out["description"] = fix_pages(tidy_copy((out.get("description") or "").replace("\\n", "\n")), meta.get("page_count"))
+    for k in ("titre_produit", "accroche"):
+        out[k] = cap_first(out.get(k) or "")
+    out["points_forts"] = [cap_first(p) for p in out["points_forts"]]
     return out
+
+
+def cap_first(s):
+    """Première lettre en majuscule (après les émojis, puces, ** ou guillemets éventuels)."""
+    m = re.match(r"^([^\wÀ-ÿ]*)([a-zà-ÿ])", s)
+    return s if not m else s[:m.start(2)] + m.group(2).upper() + s[m.end(2):]
+
+
+def fix_pages(t, real):
+    """Le nombre de pages ne peut être que le vrai ; sinon on retire la mention inventée."""
+    pat = re.compile(r"(\d{1,4})\s*pages", re.I)
+    if real:
+        t = pat.sub(f"{real} pages", t)
+    else:
+        t = re.sub(r"\s*(?:de |d'environ |environ |plus de |près de )?\d{1,4}\s*pages(?: [a-zé]+)?", "", t, flags=re.I)
+    return t
 
 
 EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B50\u2B06\u2934\u2935\u2705\u274C\u2728]\ufe0f?")
@@ -2215,7 +2237,8 @@ def tidy_copy(t, max_emoji=6):
         return m.group(0) if n <= max_emoji else ""
     t = EMOJI_RE.sub(keep, t)
     t = t.replace(" — ", ", ").replace("—", ", ").replace("\r", "")
-    t = "\n".join(re.sub(r"[ \t]+", " ", l).strip() for l in t.split("\n"))
+    t = "\n".join(cap_first(re.sub(r"[ \t]+", " ", l).strip()) for l in t.split("\n"))
+    t = re.sub(r"([.!?…]\s+)(\*\*)?([a-zà-ÿ])", lambda m: m.group(1) + (m.group(2) or "") + m.group(3).upper(), t)
     if t.count("**") % 2:
         t = t[::-1].replace("**", "", 1)[::-1]
     t = re.sub(r"\n{3,}", "\n\n", t)
@@ -2344,6 +2367,11 @@ def start_kit():
                 "author": (form.get("author") or "").strip()[:60]}
         if ext == ".pdf":
             meta["pdf_path"] = cover_src
+            try:
+                from pypdf import PdfReader
+                meta["page_count"] = len(PdfReader(cover_src).pages)
+            except Exception:
+                pass
     meta.update({k: v for k, v in (("price", price), ("label", label), ("points", points)) if v})
     if not meta.get("label"):
         meta["label"] = "Ebook PDF"

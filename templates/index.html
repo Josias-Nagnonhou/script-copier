@@ -1099,7 +1099,7 @@ function kUseKopi(){
 function kSetSrc(v){kSrc=v;document.querySelectorAll('#kSrc button').forEach(b=>b.classList.toggle('on',b.dataset.s===v));$('#kKopi').hidden=v!=='kopi';$('#kUp').hidden=v!=='up'}
 document.querySelectorAll('#kSrc button').forEach(b=>b.onclick=()=>kSetSrc(b.dataset.s));
 if(!kUseKopi())kSetSrc('up');
-try{$('#kAuthor').value=localStorage.getItem('ebAuthor')||''}catch(e){}
+
 function kPick(f){if(!f)return;kFileObj=f;$('#kFileName').textContent=f.name;$('#kDrop').classList.add('has');
   if(!$('#kTitle').value)$('#kTitle').value=f.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ')}
 $('#kFile').onchange=e=>kPick(e.target.files[0]);

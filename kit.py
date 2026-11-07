@@ -13,6 +13,45 @@ BODY = {"moderne": ("Poppins-Medium", "Poppins-SemiBold"), "impact": ("Poppins-M
         "doux": ("Lato-Regular", "Lato-Bold"), "editorial": ("Spectral-Regular", "Spectral-SemiBold")}
 
 
+# Duos de polices (titre, texte, texte gras, MAJUSCULES, échelle du titre) par univers : à chaque kit, Kopi en tire un.
+PAIRS = {
+    "moderne": [("Studio", "Unbounded-Black", "Sora-Regular", "Sora-SemiBold", False, .8),
+                ("Grotesk", "BricolageGrotesque-ExtraBold", "DMSans-Regular", "DMSans-Bold", False, 1.0),
+                ("Créatif", "Syne-ExtraBold", "SpaceGrotesk-Regular", "SpaceGrotesk-Bold", False, .78),
+                ("Net", "PlusJakartaSans-ExtraBold", "PlusJakartaSans-Regular", "PlusJakartaSans-Bold", False, 1.0),
+                ("Rond", "Outfit-ExtraBold", "Lexend-Regular", "Lexend-Bold", False, 1.0)],
+    "impact": [("Affiche", "Anton-Regular", "Montserrat-Regular", "Montserrat-Bold", True, 1.12),
+               ("Stade", "BebasNeue-Regular", "Montserrat-Regular", "Montserrat-Bold", True, 1.25),
+               ("Bloc", "DelaGothicOne-Regular", "Outfit-Regular", "Outfit-SemiBold", False, .82),
+               ("Large", "ArchivoExpanded-Black", "Manrope-Medium", "Manrope-Bold", True, .74),
+               ("Choc", "Montserrat-Black", "Montserrat-Regular", "Montserrat-Bold", True, .88)],
+    "editorial": [("Magazine", "PlayfairDisplay-ExtraBold", "DMSans-Regular", "DMSans-Bold", False, 1.0),
+                  ("Une", "AbrilFatface-Regular", "Lato-Regular", "Lato-Bold", False, 1.0),
+                  ("Revue", "YoungSerif-Regular", "PlusJakartaSans-Regular", "PlusJakartaSans-Bold", False, .95),
+                  ("Galerie", "InstrumentSerif-Regular", "Manrope-Medium", "Manrope-Bold", False, 1.22)],
+    "luxe": [("Prestige", "Gloock-Regular", "Sora-Regular", "Sora-SemiBold", False, .95),
+             ("Maison", "CormorantGaramond-Bold", "Manrope-Medium", "Manrope-Bold", False, 1.12),
+             ("Velours", "DMSerifDisplay-Regular", "Lato-Regular", "Lato-Bold", False, 1.0),
+             ("Signature", "PlayfairDisplay-BoldItalic", "Montserrat-Regular", "Montserrat-Bold", False, 1.0)],
+    "doux": [("Tendre", "Fraunces-Bold", "Outfit-Regular", "Outfit-SemiBold", False, 1.0),
+             ("Cocon", "YoungSerif-Regular", "Lexend-Regular", "Lexend-Bold", False, .95),
+             ("Pétale", "DMSerifDisplay-Regular", "Lato-Regular", "Lato-Bold", False, 1.0),
+             ("Plume", "InstrumentSerif-Italic", "PlusJakartaSans-Regular", "PlusJakartaSans-Bold", False, 1.22)],
+    "sacre": [("Temple", "Cinzel-Bold", "Lato-Regular", "Lato-Bold", False, .9),
+              ("Psaume", "Marcellus-Regular", "Spectral-Regular", "Spectral-SemiBold", False, 1.0),
+              ("Lumière", "CormorantGaramond-Bold", "Lato-Regular", "Lato-Bold", False, 1.12),
+              ("Encens", "Gloock-Regular", "Manrope-Medium", "Manrope-Bold", False, .95)],
+}
+
+
+def pick_pair(uni="moderne", seed=None, any_style=False):
+    """Choisit un duo de polices adapté au sujet ; change à chaque kit."""
+    pool = (PAIRS["moderne"] + PAIRS["editorial"] + PAIRS["luxe"] + PAIRS["impact"]) if any_style \
+        else PAIRS.get(uni, PAIRS["moderne"])
+    name, disp, body, bold, upper, sc = random.Random(seed).choice(pool)
+    return {"name": name, "display": disp, "body": body, "bold": bold, "upper": upper, "scale": sc}
+
+
 def font(name, size):
     return ImageFont.truetype(os.path.join(FONT_DIR, name + ".ttf"), int(size))
 
@@ -332,7 +371,8 @@ def fit_title(draw, text, fname, maxw, maxh, start, upper=False, k=1):
     while size > 30 * k:
         f = font(fname, size)
         lines = wrap(draw, text, f, maxw)
-        lh = size * (.95 if upper else 1.08)
+        bb = f.getbbox("ÉÀHgjpq" if not upper else "ÉÀH")
+        lh = max(size * (.95 if upper else 1.08), (bb[3] - bb[1]) * 1.08)
         if len(lines) * lh <= maxh and len(lines) <= 4:
             return f, lines, lh
         size -= 4 * k
@@ -363,7 +403,7 @@ def _unused_bg_from_cover(cover, size, pal, dark=True):
     return Image.blend(im, over, .78 if dark else .82).convert("RGBA")
 
 
-def _scene(canvas, cover, pages, best, cx, cy, scale, pal, uni, n_pages, label="PDF", compact=False):
+def _scene(canvas, cover, pages, best, cx, cy, scale, pal, uni, n_pages, label="PDF", compact=False, badge_font=None):
     """Compose la scène produit : pages en éventail, tablette, livre relié, téléphone, pastille."""
     cov = Image.open(cover).convert("RGB")
     acc = readable(rgb(pal["accent"]), 95)
@@ -383,7 +423,7 @@ def _scene(canvas, cover, pages, best, cx, cy, scale, pal, uni, n_pages, label="
     place(canvas, ph, cx + S * .33, cy + S * .2, -7, shadow=200)
     # pastille
     if n_pages:
-        bd = badge(S * .17, label, f"{n_pages} pages", acc, DISPLAY.get("impact"), -12)
+        bd = badge(S * .17, label, f"{n_pages} pages", acc, badge_font or DISPLAY.get("impact"), -12)
         place(canvas, bd, cx - S * .39, cy + S * .33, 0, shadow=110)
 
 
@@ -392,15 +432,15 @@ def wide_visual(cover, out, info, pal, uni="moderne", pdf=None):
     K = 2
     W, H = 1920 * K, 1080 * K
     P = lambda v: int(round(v * K))
+    fp = info.get("pair") or pick_pair(uni, info.get("title"))
     canvas = mesh_bg((W, H), pal, dark=True)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
     n = info.get("pages") or n
-    _scene(canvas, cover, pages, best, W * .755, H * .52, H * .84, pal, uni, n)
+    _scene(canvas, cover, pages, best, W * .755, H * .52, H * .84, pal, uni, n, badge_font=fp["display"])
     d = ImageDraw.Draw(canvas)
     acc, main = readable(rgb(pal["accent"])), rgb(pal["main"])
     x, maxw = P(110), int(W * .385)
-    body, bold = BODY.get(uni, BODY["moderne"])
-    upper = uni == "impact"
+    body, bold, upper, disp = fp["body"], fp["bold"], fp["upper"], fp["display"]
     y = P(150)
     if info.get("author"):
         d.text((x, P(86)), info["author"].upper(), font=font(bold, P(22)), fill=(255, 255, 255, 190))
@@ -411,11 +451,10 @@ def wide_visual(cover, out, info, pal, uni="moderne", pdf=None):
     tc = (20, 20, 20) if sum(acc) > 380 else (255, 255, 255)
     d.text((x + P(23), y + P(25)), label, font=lf, fill=tc, anchor="lm")
     y += P(86)
-    tf, lines, lh = fit_title(d, info["title"], DISPLAY.get(uni, DISPLAY["moderne"]), maxw, P(320),
-                              P(100 if upper else 80), upper, K)
+    tf, lines, lh = fit_title(d, info["title"], disp, maxw, P(320), P(84 * fp["scale"]), upper, K)
     for ln in lines:
         d.text((x, y), ln, font=tf, fill=(255, 255, 255)); y += lh
-    y += P(14)
+    y += P(26)
     if info.get("subtitle"):
         sf = font(body, P(31))
         for ln in wrap(d, info["subtitle"], sf, maxw)[:3]:
@@ -442,18 +481,19 @@ def wide_visual(cover, out, info, pal, uni="moderne", pdf=None):
     d.line([(ax - P(9), y + P(41)), (ax + P(9), y + P(41))], fill=tc, width=P(4))
     d.line([(ax + P(2), y + P(33)), (ax + P(10), y + P(41)), (ax + P(2), y + P(49))], fill=tc, width=P(4), joint="curve")
     if info.get("price"):
-        pf = font(DISPLAY.get(uni, "Poppins-ExtraBold") if uni != "impact" else "BebasNeue-Regular", P(60 if uni == "impact" else 46))
+        pf = font(disp, P(48 * min(1.2, fp["scale"])))
         d.text((x + cwid + P(36), y + P(41)), info["price"], font=pf, fill=(255, 255, 255), anchor="lm")
     save_hq(canvas, out)
 
 
-def square_visual(cover, out, pal, uni="moderne", pdf=None, n_pages=0):
+def square_visual(cover, out, pal, uni="moderne", pdf=None, n_pages=0, pair=None):
     """Visuel carré 3000×3000 : la scène produit seule, centrée, sur un fond dégradé moderne."""
     S = 3000
     dark = uni in ("luxe", "sacre", "impact", "moderne")
     canvas = mesh_bg((S, S), pal, dark=dark, seed=11)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
-    _scene(canvas, cover, pages, best, S * .52, S * .52, S * .76, pal, uni, n_pages or n)
+    _scene(canvas, cover, pages, best, S * .52, S * .52, S * .76, pal, uni, n_pages or n,
+           badge_font=(pair or {}).get("display"))
     save_hq(canvas, out)
 
 
@@ -462,14 +502,14 @@ def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
     K = 2
     W, H = 1080 * K, 1920 * K
     P = lambda v: int(round(v * K))
+    fp = info.get("pair") or pick_pair(uni, info.get("title"))
     canvas = mesh_bg((W, H), pal, dark=True, seed=23)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
     n = n_pages or n
     d = ImageDraw.Draw(canvas)
     acc, main = readable(rgb(pal["accent"])), rgb(pal["main"])
     tc = (20, 20, 20) if sum(acc) > 380 else (255, 255, 255)
-    body, bold = BODY.get(uni, BODY["moderne"])
-    upper = uni == "impact"
+    body, bold, upper, disp = fp["body"], fp["bold"], fp["upper"], fp["display"]
     y = P(230)
     label = (info.get("label") or "Nouvel ebook").upper()
     lf = font(bold, P(30))
@@ -478,12 +518,11 @@ def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
     d.text((W / 2, y + P(30)), label, font=lf, fill=tc, anchor="mm")
     y += P(96)
     hook = (info.get("hook") or info.get("title") or "").strip()
-    tf, lines, lh = fit_title(d, hook, DISPLAY.get(uni, DISPLAY["moderne"]), W - P(150), P(300),
-                              P(96 if upper else 74), upper, K)
+    tf, lines, lh = fit_title(d, hook, disp, W - P(150), P(300), P(78 * fp["scale"]), upper, K)
     for ln in lines[:4]:
         d.text((W / 2, y), ln, font=tf, fill=(255, 255, 255), anchor="ma"); y += lh
     scene_cy = y + P(395)
-    _scene(canvas, cover, pages, best, W * .51, scene_cy, W * .76, pal, uni, n)
+    _scene(canvas, cover, pages, best, W * .51, scene_cy, W * .76, pal, uni, n, badge_font=disp)
     d = ImageDraw.Draw(canvas)
     y = scene_cy + W * .76 * .46
     bf = font(bold, P(36))
@@ -499,9 +538,9 @@ def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
             y += P(62)
     if info.get("price"):
         y += P(18)
-        pf = font("BebasNeue-Regular" if upper else DISPLAY.get(uni, "Poppins-ExtraBold"), P(84 if upper else 64))
+        pf = font(disp, P(66 * min(1.2, fp["scale"])))
         d.text((W / 2, y), info["price"], font=pf, fill=(255, 255, 255), anchor="ma")
-        y += P(84 if upper else 78)
+        y += P(66 * min(1.2, fp["scale"]) + 14)
     cy0 = max(y + P(30), H - P(500))
     cta = "LIEN DANS LA BIO"
     cf = font(bold, P(46))

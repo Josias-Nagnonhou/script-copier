@@ -2224,21 +2224,24 @@ def tidy_copy(t, max_emoji=6):
 
 def _kit_visuals(job, d, safe, cover, meta, pal, uni, points, copy):
     """Les trois visuels 4K du kit (16:9, carré, story)."""
+    fp = KIT.pick_pair(uni, job["id"], any_style=not meta.get("univers"))
+    job["fonts"] = fp["name"]
+    print(f"[kit {job['id']}] polices : {fp['name']} ({fp['display']} + {fp['body']})", flush=True)
     job["step"], job["pct"] = "Création du visuel 16:9 en 4K…", 70
     wide = os.path.join(d, f"{safe}_16x9_4K.jpg")
     KIT.wide_visual(cover, wide, {"title": meta.get("title") or "", "subtitle": meta.get("subtitle") or "",
                                   "points": points, "price": meta.get("price") or "", "label": meta.get("label") or "Ebook PDF",
-                                  "author": meta.get("author") or "", "pages": meta.get("page_count") or 0},
+                                  "author": meta.get("author") or "", "pages": meta.get("page_count") or 0, "pair": fp},
                     pal, uni, pdf=meta.get("pdf_path"))
     job["step"], job["pct"] = "Création du visuel carré…", 88
     square = os.path.join(d, f"{safe}_carre_4K.jpg")
-    KIT.square_visual(cover, square, pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
+    KIT.square_visual(cover, square, pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0, pair=fp)
     job["step"], job["pct"] = "Création du visuel story 9:16…", 94
     story = os.path.join(d, f"{safe}_story_9x16_4K.jpg")
     hook = (copy.get("accroche") or "").strip()
     KIT.story_visual(cover, story, {"hook": hook if 8 < len(hook) <= 95 else (meta.get("title") or ""),
                                     "title": meta.get("title") or "", "points": points, "price": meta.get("price") or "",
-                                    "label": meta.get("label") or "Ebook PDF"},
+                                    "label": meta.get("label") or "Ebook PDF", "pair": fp},
                      pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
 
 

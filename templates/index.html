@@ -356,6 +356,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
         <figure class="kfig kwide"><img id="kWide" alt="Visuel 16:9 de l'ebook"><figcaption><b>Visuel boutique · 16:9</b><a class="btn" id="kWideDl" href="#">Télécharger</a></figcaption></figure>
         <figure class="kfig ksq"><img id="kSq" alt="Visuel carré de l'ebook"><figcaption><b>Visuel carré</b><a class="btn" id="kSqDl" href="#">Télécharger</a></figcaption></figure>
         <figure class="kfig kst"><img id="kSt" alt="Visuel story 9:16 de l'ebook"><figcaption><b>Story · 9:16</b><a class="btn" id="kStDl" href="#">Télécharger</a></figcaption></figure>
+        <figure class="kfig ksq kbio"><img id="kBio" alt="Visuel carré lien en bio"><figcaption><b>Carré · Lien en bio</b><a class="btn" id="kBioDl" href="#">Télécharger</a></figcaption></figure>
       </div>
       <section class="rsec kcopy">
         <div class="kcopyh"><h3>Description de vente</h3><button type="button" class="btn dl" id="kCopyDesc">Copier pour ma boutique</button></div>
@@ -1130,8 +1131,8 @@ function kWatch(id){
     clearInterval(kTimer);kSetBusy(false);
     if(d.phase==='error'){kErr(d.error);return}
     const k=await (await fetch('/api/job/'+id+'/kit')).json(),c=k.copy||{},v=Date.now();
-    $('#kWide').src=`/api/job/${id}/kit/wide?v=${v}&prev=1`;$('#kSq').src=`/api/job/${id}/kit/square?v=${v}&prev=1`;$('#kSt').src=`/api/job/${id}/kit/story?v=${v}&prev=1`;
-    $('#kWideDl').href=`/api/job/${id}/kit/wide?dl=1`;$('#kSqDl').href=`/api/job/${id}/kit/square?dl=1`;$('#kStDl').href=`/api/job/${id}/kit/story?dl=1`;
+    $('#kWide').src=`/api/job/${id}/kit/wide?v=${v}&prev=1`;$('#kSq').src=`/api/job/${id}/kit/square?v=${v}&prev=1`;$('#kSt').src=`/api/job/${id}/kit/story?v=${v}&prev=1`;$('#kBio').src=`/api/job/${id}/kit/bio?v=${v}&prev=1`;
+    $('#kWideDl').href=`/api/job/${id}/kit/wide?dl=1`;$('#kSqDl').href=`/api/job/${id}/kit/square?dl=1`;$('#kStDl').href=`/api/job/${id}/kit/story?dl=1`;$('#kBioDl').href=`/api/job/${id}/kit/bio?dl=1`;
     $('#kZip').href=`/api/job/${id}/kit/zip?dl=1`;$('#kZip').setAttribute('aria-disabled','false');
     $('#kPTitle').value=c.titre_produit||k.title||'';$('#kDesc').value=c.description||'';kRender();$('#kHook').value=c.accroche||'';
     $('#kState').innerHTML=k.copy_error?`<div class="err">${esc(k.copy_error)}</div>`:'Kit prêt : tes visuels et ta description sont juste en dessous.';

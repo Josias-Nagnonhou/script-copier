@@ -576,6 +576,88 @@ def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
     save_hq(canvas, out)
 
 
+def bio_square_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
+    """Carré 3000×3000 « lien en bio » pour la fin des vidéos TikTok : promesse, produit, prix, réassurance, gros bouton."""
+    K = 3000 / 1080
+    S = 3000
+    P = lambda v: int(round(v * K))
+    fp = info.get("pair") or pick_pair(uni, info.get("title"))
+    canvas = mesh_bg((S, S), pal, dark=True, seed=31)
+    pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
+    n = n_pages or n
+    acc, main = readable(rgb(pal["accent"])), rgb(pal["main"])
+    tc = (20, 20, 20) if sum(acc) > 380 else (255, 255, 255)
+    body, bold, upper, disp = fp["body"], fp["bold"], fp["upper"], fp["display"]
+    d = ImageDraw.Draw(canvas)
+    # promesse en haut
+    y = P(70)
+    hook = (info.get("hook") or info.get("title") or "").strip()
+    tf, lines, lh = fit_title(d, hook, disp, S - P(160), P(150), P(58 * fp["scale"]), upper, K)
+    for ln in lines[:2]:
+        d.text((S / 2, y), ln, font=tf, fill=(255, 255, 255), anchor="ma"); y += lh
+    # le produit
+    by0, by1 = S - P(210), S - P(70)
+    ry = by0 - P(78)                       # ligne de réassurance
+    sc = min(S * .55, (ry - P(24) - (y + P(44))) / .93)
+    scene_cy = y + P(44) + .45 * sc
+    _scene(canvas, cover, pages, best, S * .5, scene_cy, sc, pal, uni, n, badge_font=disp)
+    d = ImageDraw.Draw(canvas)
+    # pastille prix (en haut à droite du produit)
+    if info.get("price"):
+        R = P(118)
+        st = Image.new("RGBA", (R * 2 + 8, R * 2 + 8), (0, 0, 0, 0))
+        g = ImageDraw.Draw(st)
+        import math
+        pts = []
+        for k in range(48):  # étoile festonnée façon étiquette promo
+            a = math.pi * 2 * k / 48
+            r = R if k % 2 == 0 else R * .9
+            pts.append((R + 4 + r * math.cos(a), R + 4 + r * math.sin(a)))
+        g.polygon(pts, fill=acc + (255,))
+        price = info["price"]
+        num, cur = (price.rsplit(" ", 1) + [""])[:2] if " " in price else (price, "")
+        nf = font(disp, P(40) if len(num) <= 6 else P(32))
+        g.text((R + 4, R + 4 - (P(14) if cur else 0)), num, font=nf, fill=tc, anchor="mm")
+        if cur:
+            g.text((R + 4, R + 4 + P(30)), cur.upper(), font=font(bold, P(19)), fill=tc, anchor="mm")
+        place(canvas, _rot(st, 12), S * .5 + sc * .47, scene_cy - sc * .10, 0, shadow=150)
+        d = ImageDraw.Draw(canvas)
+    # réassurance
+    y = ry
+    items = ["PDF" + (f" · {n} pages" if n else ""), "Accès immédiat", "Lisible sur ton téléphone"]
+    rf = font(bold, P(25))
+    widths = [d.textlength(t, font=rf) for t in items]
+    gap = P(44)
+    x = (S - (sum(widths) + gap * (len(items) - 1) + P(34) * len(items))) / 2
+    for t, w in zip(items, widths):
+        cy = y + P(16)
+        d.ellipse([x, cy - P(13), x + P(26), cy + P(13)], fill=acc)
+        d.line([(x + P(7), cy), (x + P(11), cy + P(5)), (x + P(19), cy - P(5))], fill=tc, width=P(3), joint="curve")
+        d.text((x + P(34), y), t, font=rf, fill=(236, 234, 240))
+        x += P(34) + w + gap
+    # flèches vers le haut + gros bouton
+    cf = font(disp if upper else bold, P(56 * (1.1 if upper else 1)))
+    cta = "CLIQUE SUR LE LIEN EN BIO"
+    tw = d.textlength(cta, font=cf)
+    while tw > S - P(260) and cf.size > P(30):
+        cf = font(disp if upper else bold, cf.size - P(2)); tw = d.textlength(cta, font=cf)
+    bw = tw + P(190)
+    bx0, bx1 = (S - bw) / 2, (S + bw) / 2
+    gw = S // 8
+    glow = Image.new("RGBA", (gw, gw), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rounded_rectangle([(bx0 - P(16)) / 8, (by0 - P(16)) / 8, (bx1 + P(16)) / 8, (by1 + P(16)) / 8],
+                                           radius=P(80) / 8, fill=acc + (190,))
+    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(P(30) / 8)).resize((S, S), Image.BICUBIC))
+    d = ImageDraw.Draw(canvas)
+    d.rounded_rectangle([bx0, by0, bx1, by1], radius=(by1 - by0) / 2, fill=acc)
+    ax, ay = bx0 + P(78), (by0 + by1) / 2
+    d.ellipse([ax - P(42), ay - P(42), ax + P(42), ay + P(42)], fill=tc)
+    d.line([(ax, ay + P(22)), (ax, ay - P(22))], fill=acc, width=P(8))
+    d.line([(ax - P(17), ay - P(5)), (ax, ay - P(23)), (ax + P(17), ay - P(5))], fill=acc, width=P(8), joint="curve")
+    d.text((ax + P(66), ay), cta, font=cf, fill=tc, anchor="lm")
+    save_hq(canvas, out)
+
+
 def cover_from_upload(path, out):
     """Image ou PDF importé → image de couverture JPEG."""
     if path.lower().endswith(".pdf"):

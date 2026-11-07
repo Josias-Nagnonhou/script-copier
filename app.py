@@ -2243,6 +2243,11 @@ def _kit_visuals(job, d, safe, cover, meta, pal, uni, points, copy):
                                     "title": meta.get("title") or "", "points": points, "price": meta.get("price") or "",
                                     "label": meta.get("label") or "Ebook PDF", "pair": fp},
                      pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
+    job["step"], job["pct"] = "Création du visuel « lien en bio »…", 97
+    bio = os.path.join(d, f"{safe}_lien_en_bio_4K.jpg")
+    KIT.bio_square_visual(cover, bio, {"hook": hook if 8 < len(hook) <= 70 else (meta.get("title") or ""),
+                                       "title": meta.get("title") or "", "price": meta.get("price") or "", "pair": fp},
+                          pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
 
 
 HEAVY = threading.Lock()  # petit serveur : jamais deux rendus lourds (visuels 4K / montage vidéo) en même temps
@@ -2278,15 +2283,16 @@ def run_kit_job(job, meta, cover_src, about):
             _kit_visuals(job, d, safe, cover, meta, pal, uni, points, copy)
         finally:
             HEAVY.release()
-        wide, square, story = (os.path.join(d, f"{safe}_{x}.jpg") for x in ("16x9_4K", "carre_4K", "story_9x16_4K"))
+        wide, square, story, bio = (os.path.join(d, f"{safe}_{x}.jpg")
+                                    for x in ("16x9_4K", "carre_4K", "story_9x16_4K", "lien_en_bio_4K"))
         zp = os.path.join(d, f"{safe}_kit.zip")
         with zipfile.ZipFile(zp, "w", zipfile.ZIP_STORED) as z:
             z.write(wide, os.path.basename(wide)); z.write(square, os.path.basename(square))
-            z.write(story, os.path.basename(story))
+            z.write(story, os.path.basename(story)); z.write(bio, os.path.basename(bio))
             if copy.get("description"):
                 z.writestr(f"{safe}_description.txt", (copy.get("titre_produit", "") + "\n\n" + re.sub(r"\*\*(.+?)\*\*", r"\1", copy["description"])
                                                        + ("\n\n" + copy["accroche"] if copy.get("accroche") else "")).encode("utf-8"))
-        job.update(kit={"wide": wide, "square": square, "story": story, "zip": zp}, copy=copy)
+        job.update(kit={"wide": wide, "square": square, "story": story, "bio": bio, "zip": zp}, copy=copy)
         job["phase"], job["pct"], job["step"] = "done", 100, "Kit prêt"
         print(f"[kit {job['id']}] terminé (description : {'oui' if copy.get('description') else 'non'})", flush=True)
     except Exception as e:

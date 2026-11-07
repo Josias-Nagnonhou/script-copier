@@ -1,7 +1,7 @@
 """Kopi — kit de vente d'un ebook : mockup 3D, visuel 16:9 pour la boutique, visuel carré."""
 import os, re, random
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageEnhance, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageEnhance, ImageOps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONT_DIR = os.path.join(HERE, "fonts")
@@ -412,28 +412,62 @@ def _unused_bg_from_cover(cover, size, pal, dark=True):
     return Image.blend(im, over, .78 if dark else .82).convert("RGBA")
 
 
+def _reflect(canvas, im, cx, bottom, strength=.22, length=.16):
+    """Reflet au sol (façon vitrine) sous un objet posé."""
+    h = int(im.height * length)
+    if h < 4:
+        return
+    ref = im.transpose(Image.FLIP_TOP_BOTTOM).crop((0, 0, im.width, h))
+    grad = Image.linear_gradient("L").resize((1, h)).point(lambda v: int((255 - v) * strength)).resize((im.width, h))
+    a = ImageChops.multiply(ref.split()[3], grad)
+    ref.putalpha(a)
+    ref = ref.filter(ImageFilter.GaussianBlur(max(1, im.width * .004)))
+    canvas.alpha_composite(ref, (int(cx - im.width / 2), int(bottom + im.height * .004)))
+
+
+def _backlight(canvas, cx, cy, r, col, alpha=120):
+    """Halo lumineux doux derrière le produit."""
+    W, H = canvas.size
+    sc = 8
+    lay = Image.new("RGBA", (W // sc, H // sc), (0, 0, 0, 0))
+    ImageDraw.Draw(lay).ellipse([(cx - r) / sc, (cy - r * .8) / sc, (cx + r) / sc, (cy + r * .8) / sc], fill=col + (alpha,))
+    lay = lay.filter(ImageFilter.GaussianBlur(r / sc * .45)).resize((W, H), Image.BICUBIC)
+    canvas.alpha_composite(lay)
+
+
 def _scene(canvas, cover, pages, best, cx, cy, scale, pal, uni, n_pages, label="PDF", compact=False, badge_font=None):
-    """Compose la scène produit : pages en éventail, tablette, livre relié, téléphone, pastille."""
+    """Scène produit réaliste : livre relié 3D + téléphone, halo de lumière, ombres de contact et reflet au sol."""
     cov = Image.open(cover).convert("RGB")
     acc = readable(rgb(pal["accent"]), 95)
     S = scale
-    others = [p for k, p in enumerate(pages) if k != best]
-    # pages intérieures en éventail derrière
-    for k, (pg, ang, dx, dy) in enumerate(zip(others[:2], (-14, -5), (.34, .25), (-.09, -.12))):
-        place(canvas, page_card(pg, int(S * .40)), cx + S * dx, cy + S * dy, ang, shadow=120)
-    # tablette
-    scr = pages[best] if pages else cov
-    place(canvas, tablet(scr, int(S * .46)), cx - S * .33, cy - S * .05, 6, shadow=170)
+    ground = cy + S * .40                       # ligne du « sol » où les objets sont posés
+    _backlight(canvas, cx - S * .02, cy - S * .02, S * .62, readable(rgb(pal["main"]), 70), 110)
     # livre relié
-    book = book_mockup(cover, S * .78)
-    place(canvas, book, cx + S * .03, cy + S * .04, 0, shadow=210, lift=1.2)
-    # téléphone
-    ph = phone(cov, int(S * .22), acc)
-    place(canvas, ph, cx + S * .33, cy + S * .2, -7, shadow=200)
+    book = book_mockup(cover, S * .80)
+    bx = cx - S * .09
+    _reflect(canvas, book, bx, ground)
+    place(canvas, book, bx, ground - book.height / 2, 0, shadow=215, lift=1.15)
+    # ombre de contact sous le livre (là où il touche le sol)
+    _contact(canvas, bx, ground, book.width * .95)
+    # téléphone, posé devant et un peu de côté
+    ph = phone(cov, int(S * .27), acc)
+    px = cx + S * .30
+    _reflect(canvas, ph, px, ground + S * .035, .18, .12)
+    place(canvas, ph, px, ground + S * .035 - ph.height / 2, 0, shadow=200, lift=1.0)
+    _contact(canvas, px, ground + S * .035, ph.width * .9)
     # pastille
     if n_pages:
-        bd = badge(S * .17, label, f"{n_pages} pages", acc, badge_font or DISPLAY.get("impact"), -12)
-        place(canvas, bd, cx - S * .39, cy + S * .33, 0, shadow=110)
+        bd = badge(S * .16, label, f"{n_pages} pages", acc, badge_font or DISPLAY.get("impact"), -12)
+        place(canvas, bd, bx - book.width * .53, ground - S * .045, 0, shadow=110)
+
+
+def _contact(canvas, x, y, w):
+    """Ombre de contact très douce et serrée au pied d'un objet."""
+    h = max(6, int(w * .07))
+    lay = Image.new("RGBA", (int(w * 1.3), h * 4), (0, 0, 0, 0))
+    ImageDraw.Draw(lay).ellipse([w * .15, h * 1.5, w * 1.15, h * 2.5], fill=(0, 0, 0, 150))
+    lay = lay.filter(ImageFilter.GaussianBlur(h * .45))
+    canvas.alpha_composite(lay, (int(x - w * .65), int(y - h * 2)))
 
 
 def wide_visual(cover, out, info, pal, uni="moderne", pdf=None):
@@ -501,7 +535,7 @@ def square_visual(cover, out, pal, uni="moderne", pdf=None, n_pages=0, pair=None
     dark = uni in ("luxe", "sacre", "impact", "moderne")
     canvas = mesh_bg((S, S), pal, dark=dark, seed=11)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
-    _scene(canvas, cover, pages, best, S * .52, S * .52, S * .76, pal, uni, n_pages or n,
+    _scene(canvas, cover, pages, best, S * .5, S * .47, S * .9, pal, uni, n_pages or n,
            badge_font=(pair or {}).get("display"))
     save_hq(canvas, out)
 

@@ -443,29 +443,19 @@ def _backlight(canvas, cx, cy, r, col, alpha=120):
 
 
 def _scene(canvas, cover, pages, best, cx, cy, scale, pal, uni, n_pages, label="PDF", compact=False, badge_font=None):
-    """Scène produit réaliste : livre relié 3D + téléphone, halo de lumière, ombres de contact et reflet au sol."""
-    cov = Image.open(cover).convert("RGB")
+    """Scène produit réaliste : le livre relié 3D seul, halo de lumière, ombre de contact et reflet au sol."""
     acc = readable(rgb(pal["accent"]), 95)
     S = scale
-    ground = cy + S * .40                       # ligne du « sol » où les objets sont posés
-    _backlight(canvas, cx - S * .02, cy - S * .02, S * .62, readable(rgb(pal["main"]), 70), 110)
-    # livre relié
-    book = book_mockup(cover, S * .80)
-    bx = cx - S * .09
-    _reflect(canvas, book, bx, ground)
-    place(canvas, book, bx, ground - book.height / 2, 0, shadow=215, lift=1.15)
-    # ombre de contact sous le livre (là où il touche le sol)
-    _contact(canvas, bx, ground, book.width * .95)
-    # téléphone, posé devant et un peu de côté
-    ph = phone(cov, int(S * .27), acc)
-    px = cx + S * .30
-    _reflect(canvas, ph, px, ground + S * .035, .18, .12)
-    place(canvas, ph, px, ground + S * .035 - ph.height / 2, 0, shadow=200, lift=1.0)
-    _contact(canvas, px, ground + S * .035, ph.width * .9)
-    # pastille
+    ground = cy + S * .43                       # ligne du « sol » où le livre est posé
+    _backlight(canvas, cx, cy - S * .02, S * .58, readable(rgb(pal["main"]), 70), 115)
+    book = book_mockup(cover, S * .86)
+    bx = cx - book.width * .03                  # léger décalage : la tranche de pages est à droite
+    _reflect(canvas, book, bx, ground, .24, .15)
+    place(canvas, book, bx, ground - book.height / 2, 0, shadow=220, lift=1.2)
+    _contact(canvas, bx, ground, book.width * .98)
     if n_pages:
         bd = badge(S * .16, label, f"{n_pages} pages", acc, badge_font or DISPLAY.get("impact"), -12)
-        place(canvas, bd, bx - book.width * .53, ground - S * .045, 0, shadow=110)
+        place(canvas, bd, bx - book.width * .5, ground - S * .05, 0, shadow=110)
 
 
 def _contact(canvas, x, y, w):
@@ -575,12 +565,17 @@ def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
     tf, lines, lh = fit_title(d, hook, disp, W - P(150), P(300), P(78 * fp["scale"]), upper, K)
     for ln in lines[:4]:
         d.text((W / 2, y), ln, font=tf, fill=(255, 255, 255), anchor="ma"); y += lh
-    scene_cy = y + P(395)
-    _scene(canvas, cover, pages, best, W * .51, scene_cy, W * .76, pal, uni, n, badge_font=disp)
-    d = ImageDraw.Draw(canvas)
-    y = scene_cy + W * .76 * .46
+    # le livre prend toute la place libre entre l'accroche et le bas (bénéfices, prix, bouton toujours visibles)
     bf = font(bold, P(36))
     pts = (info.get("points") or [])[:3]
+    price_h = P(18) + P(66 * min(1.2, fp["scale"]) + 14) if info.get("price") else 0
+    cta_top = H - P(470)
+    bottom = cta_top - P(30) - price_h - len(pts) * P(62)
+    ssc = max(W * .5, min((bottom - (y + P(40))) / 1.0, W * .95))
+    scene_cy = y + P(40) + .45 * ssc
+    _scene(canvas, cover, pages, best, W * .5, scene_cy, ssc, pal, uni, n, badge_font=disp)
+    d = ImageDraw.Draw(canvas)
+    y = scene_cy + ssc * .55
     if pts:
         widths = [min(W - P(220), d.textlength(p, font=bf)) for p in pts]
         x = int((W - (max(widths) + P(56))) / 2)
@@ -595,7 +590,7 @@ def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
         pf = font(disp, P(66 * min(1.2, fp["scale"])))
         d.text((W / 2, y), info["price"], font=pf, fill=(255, 255, 255), anchor="ma")
         y += P(66 * min(1.2, fp["scale"]) + 14)
-    cy0 = max(y + P(30), H - P(500))
+    cy0 = max(y + P(30), cta_top)
     cta = "LIEN DANS LA BIO"
     cf = font(bold, P(46))
     cw = d.textlength(cta, font=cf) + P(200)
@@ -671,7 +666,7 @@ def bio_square_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0)
     y2 = ry - P(62) - h2                            # « en bio »
     y1 = y2 - P(18) - h1                            # « Clique sur le lien »
     # produit : remplit l'espace entre la promesse et l'appel
-    t, bt = y + P(36), y1 - P(46)
+    t, bt = y + P(64), y1 - P(46)
     sc = max(S * .45, min((bt - t) / .97, S * .72))
     scene_cy = (t + bt) / 2 - .055 * sc
     _scene(canvas, cover, pages, best, S * .5, scene_cy, sc, pal, uni, n, badge_font=disp)
@@ -689,7 +684,7 @@ def bio_square_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0)
         g.text((R + 4, R + 4 - (P(13) if cur else 0)), num, font=nf, fill=tc, anchor="mm")
         if cur:
             g.text((R + 4, R + 4 + P(30)), cur.upper(), font=font(bold, P(18)), fill=tc, anchor="mm")
-        place(canvas, _rot(st, -10), S * .5 + sc * .47, scene_cy - sc * .12, 0, shadow=150)
+        place(canvas, _rot(st, -10), S * .5 + sc * .34, scene_cy - sc * .30, 0, shadow=150)
     d = ImageDraw.Draw(canvas)
     # ligne 1, blanche
     d.text((S / 2, y1 - b1[1]), l1, font=f1, fill=(255, 255, 255), anchor="ma")

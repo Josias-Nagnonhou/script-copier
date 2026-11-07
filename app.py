@@ -2154,39 +2154,72 @@ def gen_sales_copy(meta, about=""):
     if about:
         facts.append(f"Contenu du livre (extrait ou résumé) : {about[:4000]}")
     facts = [f for f in facts if f.split(":", 1)[1].strip()]
-    system = ("Tu es un copywriter francophone haut de gamme, spécialiste de la vente de produits digitaux en Afrique "
-              "francophone et dans la diaspora (boutiques en ligne type Chariow, Selar, WhatsApp). Tu maîtrises les "
-              "structures qui convertissent (PAS, AIDA, storytelling) et tu écris comme on parle à un ami qu'on veut aider. "
-              "Tu restes honnête : pas de faux témoignages, pas de chiffres ni de résultats inventés, pas de garantie de "
-              "résultat, pas de fausse urgence ni de faux stock limité, pas de promesse de remboursement si on ne te l'a pas "
-              "donnée. Tutoiement, phrases courtes et rythmées, images concrètes du quotidien africain, ton chaleureux, sûr et "
-              "émotionnel. Tu n'inventes aucun contenu du livre : tu t'appuies sur les chapitres et bénéfices fournis.")
-    user = ("Écris la page de vente complète de cet ebook.\n" + "\n".join(facts) + "\n\n"
-            "Réponds UNIQUEMENT en JSON : {\"titre_produit\": \"titre de la fiche produit (max 80 caractères)\", "
-            "\"accroche\": \"1 phrase choc pour les réseaux sociaux\", "
+    system = (
+        "Tu écris comme un vrai créateur africain francophone qui présente SON livre à sa communauté : une personne, pas "
+        "une marque, pas une IA. Ta voix est chaleureuse, directe, un peu complice, parfois drôle, toujours sincère. Tu "
+        "tutoies. Tu parles du quotidien réel de tes lecteurs (Cotonou, Abidjan, Dakar, Douala, Lomé, Kinshasa, la "
+        "diaspora) avec des détails concrets et vivants : le transport, la famille, le travail, l'église ou la mosquée, "
+        "le téléphone, l'argent du mois, le regard des autres. Tu peux partager pourquoi ce livre existe, comme une "
+        "confidence (« J'ai écrit ce livre parce que… »), sans inventer d'histoire personnelle précise ni de faux "
+        "témoignage.\n"
+        "Règles d'écriture humaine :\n"
+        "- Mélange phrases très courtes et phrases plus longues. Commence parfois une phrase par « Et », « Mais », « Bref ». "
+        "Pose des questions au lecteur. Une ou deux expressions du parler francophone africain bien placées, sans caricature.\n"
+        "- INTERDIT (ça sonne robot) : « Dans un monde où », « Plongez », « Découvrez », « ultime », « révolutionnaire », "
+        "« incontournable », « véritable trésor », « n'attendez plus », « sans plus attendre », « transformez votre vie », "
+        "« clé du succès », « booster », « en un clin d'œil », « voyage », « embarquez », « sublimer », « libérez votre "
+        "potentiel », les tirets longs (—), les titres en MAJUSCULES, les listes où chaque ligne commence par un émoji.\n"
+        "- Mets en gras, avec **double astérisque**, 10 à 16 mots ou courts groupes de mots qui portent l'émotion ou "
+        "le bénéfice (jamais une phrase entière, jamais deux gras collés).\n"
+        "- Émojis : 4 à 6 MAXIMUM dans toute la description, placés avec goût (par exemple un au début, un ou deux dans le "
+        "corps, un près de l'appel à l'action). Jamais deux émojis dans la même ligne.\n"
+        "- Honnêteté : pas de faux avis, pas de chiffres ou de résultats inventés, pas de garantie, pas de fausse urgence, "
+        "pas de remboursement promis. Tu n'inventes aucun contenu du livre : tu t'appuies sur les chapitres fournis.")
+    user = ("Écris la description de vente de cet ebook.\n" + "\n".join(facts) + "\n\n"
+            "Réponds UNIQUEMENT en JSON : {\"titre_produit\": \"titre de la fiche produit, naturel et accrocheur (max 80 "
+            "caractères)\", \"accroche\": \"1 phrase pour les réseaux sociaux, qui sonne humain (max 95 caractères)\", "
             "\"points_forts\": [\"3 bénéfices très courts (max 42 caractères chacun) pour le visuel\"], "
-            "\"description\": \"la description LONGUE, entre 650 et 900 mots, en texte brut prêt à coller, avec des sauts de "
-            "ligne entre les paragraphes et des titres de partie en MAJUSCULES précédés d'un émoji. Structure obligatoire : "
-            "1) une accroche forte en 1 ou 2 phrases qui touche directement la douleur ou le désir du lecteur ; "
-            "2) « Est-ce que tu te reconnais ? » : 4 ou 5 situations vécues, une par ligne, commençant par 👉 ; "
-            "3) l'agitation : ce que ça coûte de rester comme ça (argent, temps, relations, paix intérieure), en 2 courts paragraphes ; "
-            "4) le déclic : présente le livre comme la solution, ce qui le rend différent ; "
-            "5) « CE QUE TU VAS DÉCOUVRIR » : 7 à 9 points commençant par ✅, chacun formulé comme un bénéfice concret "
-            "tiré des chapitres (pas juste le titre du chapitre) ; "
-            "6) « CE LIVRE EST POUR TOI SI… » (3 ou 4 lignes) puis « IL N'EST PAS POUR TOI SI… » (2 lignes, honnête) ; "
-            "7) « CE QUE TU REÇOIS » : format PDF lisible sur téléphone, tablette et ordinateur, nombre de pages si connu, "
-            "accès immédiat après paiement, bonus si le livre en contient ; "
-            "8) « TU TE DEMANDES PEUT-ÊTRE… » : 3 questions-réponses courtes qui lèvent les objections (prix, temps, "
-            "« est-ce que ça marchera pour moi ») sans rien promettre de garanti ; "
-            "9) la projection : imagine ta vie dans quelques semaines en appliquant ce que tu as appris (sans chiffre inventé) ; "
-            "10) un appel à l'action final puissant, avec le prix s'il est connu, qui invite à cliquer sur Acheter maintenant. "
-            "Varie la longueur des phrases. Émojis seulement en début de ligne de liste et de titre de partie.\"}")
+            "\"description\": \"entre 600 et 850 mots, paragraphes de 1 à 3 phrases séparés par une ligne vide. "
+            "Déroulé (sans numéroter, avec des intertitres courts et naturels écrits en **gras**, en minuscules normales, "
+            "par exemple **Ce que tu vas trouver dedans**) : "
+            "une ouverture qui accroche comme une conversation (une scène du quotidien ou une question qui pique) ; "
+            "3 ou 4 situations où le lecteur se reconnaît, en petite liste avec « • » ; "
+            "ce que ça coûte de rester comme ça, avec empathie, sans dramatiser ; "
+            "pourquoi ce livre existe et ce qui le rend différent ; "
+            "ce qu'on trouve dedans : 6 à 8 points en liste « • », chacun un bénéfice concret tiré des chapitres, "
+            "avec 1 ou 2 mots en gras par point ; "
+            "pour qui c'est fait, et honnêtement pour qui ce n'est pas fait ; "
+            "ce qu'on reçoit (PDF lisible sur téléphone, tablette et ordinateur, nombre de pages si connu, accès dès le "
+            "paiement) ; "
+            "2 ou 3 questions qu'on se pose avant d'acheter, avec des réponses franches ; "
+            "une fin chaleureuse qui invite à passer à l'action, avec le prix s'il est connu, comme un ami qui te pousse "
+            "gentiment.\"}")
     raw = groq_chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
                     max_tokens=6000, json_mode=True, tag="kit")
     out = parse_json_loose(raw)
     out["points_forts"] = [p.strip()[:48] for p in (out.get("points_forts") or []) if isinstance(p, str) and p.strip()][:3]
-    out["description"] = (out.get("description") or "").replace("\\n", "\n").strip()
+    out["description"] = tidy_copy((out.get("description") or "").replace("\\n", "\n"))
     return out
+
+
+EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B50\u2B06\u2934\u2935\u2705\u274C\u2728]\ufe0f?")
+
+
+def tidy_copy(t, max_emoji=6):
+    """Description propre : 6 émojis au plus, pas de tirets longs, gras équilibré, lignes vides régulières."""
+    n = 0
+
+    def keep(m):
+        nonlocal n
+        n += 1
+        return m.group(0) if n <= max_emoji else ""
+    t = EMOJI_RE.sub(keep, t)
+    t = t.replace(" — ", ", ").replace("—", ", ").replace("\r", "")
+    t = "\n".join(re.sub(r"[ \t]+", " ", l).strip() for l in t.split("\n"))
+    if t.count("**") % 2:
+        t = t[::-1].replace("**", "", 1)[::-1]
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
 
 
 def run_kit_job(job, meta, cover_src, about):

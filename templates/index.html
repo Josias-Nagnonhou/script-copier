@@ -268,6 +268,10 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 #aFb textarea{width:100%;box-sizing:border-box;border:2px solid var(--line,#e5e2da);border-radius:14px;padding:12px 14px;font:inherit;font-size:15px;line-height:1.45;background:var(--card,#fff);color:inherit;resize:vertical;margin:6px 0 14px}
 #aFb textarea:focus{outline:none;border-color:#111}
 #aFb label small{font-weight:500;opacity:.7}
+.kdview{border:2px solid var(--line,#e5e2da);border-radius:16px;padding:18px 20px;background:var(--card,#fff);line-height:1.6;font-size:15.5px;max-height:560px;overflow:auto;margin:6px 0 10px}
+.kdview p{margin:0 0 12px}.kdview b{font-weight:800}
+.kdbtns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.kdedit summary{cursor:pointer;font-weight:700;font-size:14px;margin:4px 0 8px}
 </style>
 </head>
 <body>
@@ -354,11 +358,19 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
         <figure class="kfig kst"><img id="kSt" alt="Visuel story 9:16 de l'ebook"><figcaption><b>Story · 9:16</b><a class="btn" id="kStDl" href="#">Télécharger</a></figcaption></figure>
       </div>
       <section class="rsec kcopy">
-        <div class="kcopyh"><h3>Description de vente</h3><button type="button" class="btn dl" id="kCopyDesc">Copier la description</button></div>
+        <div class="kcopyh"><h3>Description de vente</h3><button type="button" class="btn dl" id="kCopyDesc">Copier pour ma boutique</button></div>
         <label for="kPTitle">Titre de la fiche produit</label>
         <div class="kline"><input id="kPTitle"><button type="button" class="btn" id="kCopyTitle">Copier</button></div>
-        <label for="kDesc" style="margin-top:12px">Description <small class="opt">(tu peux la modifier avant de copier)</small></label>
-        <textarea id="kDesc" rows="28" class="ktext kdesc"></textarea>
+        <label style="margin-top:12px">Description</label>
+        <div id="kDescView" class="kdview"></div>
+        <div class="kdbtns">
+          <button type="button" class="btn" id="kCopyWa">Copier pour WhatsApp</button>
+          <button type="button" class="btn" id="kCopySoc">Copier pour Facebook / TikTok</button>
+        </div>
+        <details class="kdedit"><summary>Modifier le texte</summary>
+          <p class="hint">Mets un mot entre **deux étoiles** pour le passer en gras.</p>
+          <textarea id="kDesc" rows="22" class="ktext kdesc"></textarea>
+        </details>
         <label for="kHook" style="margin-top:12px">Accroche pour tes réseaux</label>
         <div class="kline"><input id="kHook"><button type="button" class="btn" id="kCopyHook">Copier</button></div>
       </section>
@@ -1121,13 +1133,30 @@ function kWatch(id){
     $('#kWide').src=`/api/job/${id}/kit/wide?v=${v}`;$('#kSq').src=`/api/job/${id}/kit/square?v=${v}`;$('#kSt').src=`/api/job/${id}/kit/story?v=${v}`;
     $('#kWideDl').href=`/api/job/${id}/kit/wide?dl=1`;$('#kSqDl').href=`/api/job/${id}/kit/square?dl=1`;$('#kStDl').href=`/api/job/${id}/kit/story?dl=1`;
     $('#kZip').href=`/api/job/${id}/kit/zip?dl=1`;$('#kZip').setAttribute('aria-disabled','false');
-    $('#kPTitle').value=c.titre_produit||k.title||'';$('#kDesc').value=c.description||'';$('#kHook').value=c.accroche||'';
+    $('#kPTitle').value=c.titre_produit||k.title||'';$('#kDesc').value=c.description||'';kRender();$('#kHook').value=c.accroche||'';
     $('#kState').innerHTML=k.copy_error?`<div class="err">${esc(k.copy_error)}</div>`:'Kit prêt : tes visuels et ta description sont juste en dessous.';
     $('#kRes').hidden=false;
   };
   tick();kTimer=setInterval(tick,2000);
 }
-$('#kCopyDesc').onclick=()=>copyText($('#kDesc').value,$('#kCopyDesc'),'Copier la description');
+/* description : gras **…** → boutique (texte riche), WhatsApp (*…*), Facebook/TikTok (lettres grasses) */
+function kHtml(t){return esc(t).split(/\n{2,}/).map(p=>'<p>'+p.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>')+'</p>').join('')}
+function kRender(){$('#kDescView').innerHTML=kHtml($('#kDesc').value)}
+$('#kDesc').addEventListener('input',kRender);
+function kPlain(t){return t.replace(/\*\*(.+?)\*\*/g,'$1')}
+function kBoldU(s){let o='';for(const ch of s){const c=ch.codePointAt(0);
+  if(c>=65&&c<=90)o+=String.fromCodePoint(0x1D5D4+c-65);else if(c>=97&&c<=122)o+=String.fromCodePoint(0x1D5EE+c-97);
+  else if(c>=48&&c<=57)o+=String.fromCodePoint(0x1D7EC+c-48);else o+=ch}return o}
+function copyRich(html,plain,btn,label){
+  const done=m=>{btn.textContent=m;setTimeout(()=>btn.textContent=label,2500)};
+  const fb=()=>{const v=$('#kDescView'),r=document.createRange();r.selectNodeContents(v);const s=getSelection();s.removeAllRanges();s.addRange(r);
+    let ok=false;try{ok=document.execCommand('copy')}catch(e){}s.removeAllRanges();ok?done('Copié ✓'):copyText(plain,btn,label)};
+  try{if(navigator.clipboard&&window.ClipboardItem&&window.isSecureContext){
+    navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([plain],{type:'text/plain'})})]).then(()=>done('Copié avec le gras ✓'),fb);return}}catch(e){}
+  fb()}
+$('#kCopyDesc').onclick=()=>{const t=$('#kDesc').value;copyRich(kHtml(t),kPlain(t),$('#kCopyDesc'),'Copier pour ma boutique')};
+$('#kCopyWa').onclick=()=>copyText($('#kDesc').value.replace(/\*\*(.+?)\*\*/g,'*$1*'),$('#kCopyWa'),'Copier pour WhatsApp');
+$('#kCopySoc').onclick=()=>copyText($('#kDesc').value.replace(/\*\*(.+?)\*\*/g,(m,x)=>kBoldU(x)),$('#kCopySoc'),'Copier pour Facebook / TikTok');
 $('#kCopyTitle').onclick=()=>copyText($('#kPTitle').value,$('#kCopyTitle'),'Copier');
 $('#kCopyHook').onclick=()=>copyText($('#kHook').value,$('#kCopyHook'),'Copier');
 try{const j=localStorage.getItem('kitJob');if(j)kWatch(j)}catch(e){}

@@ -371,6 +371,13 @@ def fit_title(draw, text, fname, maxw, maxh, start, upper=False, k=1):
     while size > 30 * k:
         f = font(fname, size)
         lines = wrap(draw, text, f, maxw)
+        if 2 <= len(lines) <= 4 and draw.textlength(lines[-1], font=f) < maxw * .5:
+            for k in (.92, .85, .78, .72, .66):  # rééquilibre les lignes
+                alt = wrap(draw, text, f, maxw * k)
+                if len(alt) == len(lines):
+                    lines = alt
+                if draw.textlength(lines[-1], font=f) >= draw.textlength(lines[0], font=f) * .55:
+                    break
         bb = f.getbbox("ÉÀHgjpq" if not upper else "ÉÀH")
         lh = max(size * (.95 if upper else 1.08), (bb[3] - bb[1]) * 1.08)
         if len(lines) * lh <= maxh and len(lines) <= 4:
@@ -479,7 +486,11 @@ def wide_visual(cover, out, info, pal, uni="moderne", pdf=None):
     canvas = mesh_bg((W, H), pal, dark=True)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
     n = info.get("pages") or n
-    _scene(canvas, cover, pages, best, W * .755, H * .52, H * .84, pal, uni, n, badge_font=fp["display"])
+    # le produit occupe toute la zone à droite du texte, sans vide autour
+    zx0, zx1 = P(110) + int(W * .385) + P(110), W - P(70)
+    sc = min((zx1 - zx0) / .92, (H - P(110)) / .97)
+    _scene(canvas, cover, pages, best, (zx0 + zx1) / 2 + .015 * sc, H / 2 - .045 * sc, sc, pal, uni, n,
+           badge_font=fp["display"])
     d = ImageDraw.Draw(canvas)
     acc, main = readable(rgb(pal["accent"])), rgb(pal["main"])
     x, maxw = P(110), int(W * .385)
@@ -610,8 +621,24 @@ def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
     save_hq(canvas, out)
 
 
+def _link_icon(size, col):
+    """Petite icône « maillon de chaîne » (lien)."""
+    ss = 4
+    S = size * ss
+    im = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    w = int(S * .13)
+    for dx in (-1, 1):
+        cx, cy = S / 2 + dx * S * .14, S / 2 - dx * S * .14
+        box = [cx - S * .26, cy - S * .14, cx + S * .26, cy + S * .14]
+        lay = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        ImageDraw.Draw(lay).rounded_rectangle(box, radius=S * .14, outline=col + (255,), width=w)
+        im.alpha_composite(lay.rotate(45, resample=Image.BICUBIC, center=(S / 2, S / 2)))
+    return im.resize((size, size), Image.LANCZOS)
+
+
 def bio_square_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
-    """Carré 3000×3000 « lien en bio » pour la fin des vidéos TikTok : promesse, produit, prix, réassurance, gros bouton."""
+    """Carré 3000×3000 « lien en bio » (fin des vidéos TikTok) : promesse, produit, prix, appel typographique moderne."""
     K = 3000 / 1080
     S = 3000
     P = lambda v: int(round(v * K))
@@ -619,76 +646,72 @@ def bio_square_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0)
     canvas = mesh_bg((S, S), pal, dark=True, seed=31)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
     n = n_pages or n
-    acc, main = readable(rgb(pal["accent"])), rgb(pal["main"])
+    acc, main = readable(rgb(pal["accent"]), 130), rgb(pal["main"])
     tc = (20, 20, 20) if sum(acc) > 380 else (255, 255, 255)
     body, bold, upper, disp = fp["body"], fp["bold"], fp["upper"], fp["display"]
     d = ImageDraw.Draw(canvas)
-    # promesse en haut
-    y = P(70)
+    # promesse en haut (petite, élégante)
+    y = P(64)
     hook = (info.get("hook") or info.get("title") or "").strip()
-    tf, lines, lh = fit_title(d, hook, disp, S - P(160), P(150), P(58 * fp["scale"]), upper, K)
+    tf, lines, lh = fit_title(d, hook, disp, S - P(200), P(130), P(50 * fp["scale"]), upper, K)
     for ln in lines[:2]:
         d.text((S / 2, y), ln, font=tf, fill=(255, 255, 255), anchor="ma"); y += lh
-    # le produit
-    by0, by1 = S - P(210), S - P(70)
-    ry = by0 - P(78)                       # ligne de réassurance
-    sc = min(S * .55, (ry - P(24) - (y + P(44))) / .93)
-    scene_cy = y + P(44) + .45 * sc
+    # bloc d'appel en bas : « Clique sur le lien » / « en bio » + flèche, puis réassurance
+    l1, l2 = "Clique sur le lien", "en bio"
+    if upper:
+        l1, l2 = l1.upper(), l2.upper()
+    f1 = font(disp, P(74 * fp["scale"]))
+    while d.textlength(l1, font=f1) > S - P(260) and f1.size > P(40):
+        f1 = font(disp, f1.size - P(2))
+    f2 = font(disp, int(f1.size * 1.18))
+    b1 = d.textbbox((0, 0), l1, font=f1); b2 = d.textbbox((0, 0), l2, font=f2)
+    h1, h2 = b1[3] - b1[1], b2[3] - b2[1]
+    rf = font(body, P(24))
+    ry = S - P(92)                                  # réassurance tout en bas
+    y2 = ry - P(62) - h2                            # « en bio »
+    y1 = y2 - P(18) - h1                            # « Clique sur le lien »
+    # produit : remplit l'espace entre la promesse et l'appel
+    t, bt = y + P(36), y1 - P(46)
+    sc = max(S * .45, min((bt - t) / .97, S * .72))
+    scene_cy = (t + bt) / 2 - .055 * sc
     _scene(canvas, cover, pages, best, S * .5, scene_cy, sc, pal, uni, n, badge_font=disp)
-    d = ImageDraw.Draw(canvas)
-    # pastille prix (en haut à droite du produit)
+    # pastille prix
     if info.get("price"):
-        R = P(118)
+        import math
+        R = P(112)
         st = Image.new("RGBA", (R * 2 + 8, R * 2 + 8), (0, 0, 0, 0))
         g = ImageDraw.Draw(st)
-        import math
-        pts = []
-        for k in range(48):  # étoile festonnée façon étiquette promo
-            a = math.pi * 2 * k / 48
-            r = R if k % 2 == 0 else R * .9
-            pts.append((R + 4 + r * math.cos(a), R + 4 + r * math.sin(a)))
-        g.polygon(pts, fill=acc + (255,))
+        g.ellipse([4, 4, R * 2 + 4, R * 2 + 4], fill=(255, 255, 255, 255))
+        g.ellipse([4 + P(9), 4 + P(9), R * 2 + 4 - P(9), R * 2 + 4 - P(9)], fill=acc + (255,))
         price = info["price"]
         num, cur = (price.rsplit(" ", 1) + [""])[:2] if " " in price else (price, "")
         nf = font(disp, P(40) if len(num) <= 6 else P(32))
-        g.text((R + 4, R + 4 - (P(14) if cur else 0)), num, font=nf, fill=tc, anchor="mm")
+        g.text((R + 4, R + 4 - (P(13) if cur else 0)), num, font=nf, fill=tc, anchor="mm")
         if cur:
-            g.text((R + 4, R + 4 + P(30)), cur.upper(), font=font(bold, P(19)), fill=tc, anchor="mm")
-        place(canvas, _rot(st, 12), S * .5 + sc * .47, scene_cy - sc * .10, 0, shadow=150)
-        d = ImageDraw.Draw(canvas)
-    # réassurance
-    y = ry
-    items = ["PDF" + (f" · {n} pages" if n else ""), "Accès immédiat", "Lisible sur ton téléphone"]
-    rf = font(bold, P(25))
-    widths = [d.textlength(t, font=rf) for t in items]
-    gap = P(44)
-    x = (S - (sum(widths) + gap * (len(items) - 1) + P(34) * len(items))) / 2
-    for t, w in zip(items, widths):
-        cy = y + P(16)
-        d.ellipse([x, cy - P(13), x + P(26), cy + P(13)], fill=acc)
-        d.line([(x + P(7), cy), (x + P(11), cy + P(5)), (x + P(19), cy - P(5))], fill=tc, width=P(3), joint="curve")
-        d.text((x + P(34), y), t, font=rf, fill=(236, 234, 240))
-        x += P(34) + w + gap
-    # flèches vers le haut + gros bouton
-    cf = font(disp if upper else bold, P(56 * (1.1 if upper else 1)))
-    cta = "CLIQUE SUR LE LIEN EN BIO"
-    tw = d.textlength(cta, font=cf)
-    while tw > S - P(260) and cf.size > P(30):
-        cf = font(disp if upper else bold, cf.size - P(2)); tw = d.textlength(cta, font=cf)
-    bw = tw + P(190)
-    bx0, bx1 = (S - bw) / 2, (S + bw) / 2
-    gw = S // 8
-    glow = Image.new("RGBA", (gw, gw), (0, 0, 0, 0))
-    ImageDraw.Draw(glow).rounded_rectangle([(bx0 - P(16)) / 8, (by0 - P(16)) / 8, (bx1 + P(16)) / 8, (by1 + P(16)) / 8],
-                                           radius=P(80) / 8, fill=acc + (190,))
-    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(P(30) / 8)).resize((S, S), Image.BICUBIC))
+            g.text((R + 4, R + 4 + P(30)), cur.upper(), font=font(bold, P(18)), fill=tc, anchor="mm")
+        place(canvas, _rot(st, -10), S * .5 + sc * .47, scene_cy - sc * .12, 0, shadow=150)
     d = ImageDraw.Draw(canvas)
-    d.rounded_rectangle([bx0, by0, bx1, by1], radius=(by1 - by0) / 2, fill=acc)
-    ax, ay = bx0 + P(78), (by0 + by1) / 2
-    d.ellipse([ax - P(42), ay - P(42), ax + P(42), ay + P(42)], fill=tc)
-    d.line([(ax, ay + P(22)), (ax, ay - P(22))], fill=acc, width=P(8))
-    d.line([(ax - P(17), ay - P(5)), (ax, ay - P(23)), (ax + P(17), ay - P(5))], fill=acc, width=P(8), joint="curve")
-    d.text((ax + P(66), ay), cta, font=cf, fill=tc, anchor="lm")
+    # ligne 1, blanche
+    d.text((S / 2, y1 - b1[1]), l1, font=f1, fill=(255, 255, 255), anchor="ma")
+    # ligne 2 : « en bio » en couleur d'accent, soulignée d'un trait doux, avec flèche vers le haut
+    w2 = d.textlength(l2, font=f2)
+    icon = int(h2 * 1.05)
+    gap = P(26)
+    tot = w2 + gap + icon
+    x2 = (S - tot) / 2
+    d.rounded_rectangle([x2, y2 + h2 + P(14), x2 + w2, y2 + h2 + P(22)], radius=P(4), fill=acc)
+    d.text((x2, y2 - b2[1]), l2, font=f2, fill=acc)
+    ix, iy = x2 + w2 + gap, y2 + (h2 - icon) / 2
+    d.ellipse([ix, iy, ix + icon, iy + icon], fill=acc)
+    c = (ix + icon / 2, iy + icon / 2)
+    lw = max(4, int(icon * .09))
+    d.line([(c[0], c[1] + icon * .24), (c[0], c[1] - icon * .24)], fill=tc, width=lw)
+    d.line([(c[0] - icon * .19, c[1] - icon * .04), (c[0], c[1] - icon * .25), (c[0] + icon * .19, c[1] - icon * .04)],
+           fill=tc, width=lw, joint="curve")
+    # réassurance : une ligne fine et discrète
+    items = ["PDF" + (f" · {n} pages" if n else ""), "Accès immédiat", "Paiement sécurisé" if info.get("secure") else "Lisible sur ton téléphone"]
+    txt = "   ·   ".join(items)
+    d.text((S / 2, ry), txt, font=rf, fill=(220, 218, 228), anchor="ma")
     save_hq(canvas, out)
 
 

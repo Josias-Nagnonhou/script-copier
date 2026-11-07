@@ -1130,7 +1130,7 @@ function kWatch(id){
     clearInterval(kTimer);kSetBusy(false);
     if(d.phase==='error'){kErr(d.error);return}
     const k=await (await fetch('/api/job/'+id+'/kit')).json(),c=k.copy||{},v=Date.now();
-    $('#kWide').src=`/api/job/${id}/kit/wide?v=${v}`;$('#kSq').src=`/api/job/${id}/kit/square?v=${v}`;$('#kSt').src=`/api/job/${id}/kit/story?v=${v}`;
+    $('#kWide').src=`/api/job/${id}/kit/wide?v=${v}&prev=1`;$('#kSq').src=`/api/job/${id}/kit/square?v=${v}&prev=1`;$('#kSt').src=`/api/job/${id}/kit/story?v=${v}&prev=1`;
     $('#kWideDl').href=`/api/job/${id}/kit/wide?dl=1`;$('#kSqDl').href=`/api/job/${id}/kit/square?dl=1`;$('#kStDl').href=`/api/job/${id}/kit/story?dl=1`;
     $('#kZip').href=`/api/job/${id}/kit/zip?dl=1`;$('#kZip').setAttribute('aria-disabled','false');
     $('#kPTitle').value=c.titre_produit||k.title||'';$('#kDesc').value=c.description||'';kRender();$('#kHook').value=c.accroche||'';

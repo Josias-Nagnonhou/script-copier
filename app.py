@@ -2222,6 +2222,29 @@ def tidy_copy(t, max_emoji=6):
     return t.strip()
 
 
+def _kit_visuals(job, d, safe, cover, meta, pal, uni, points, copy):
+    """Les trois visuels 4K du kit (16:9, carré, story)."""
+    job["step"], job["pct"] = "Création du visuel 16:9 en 4K…", 70
+    wide = os.path.join(d, f"{safe}_16x9_4K.jpg")
+    KIT.wide_visual(cover, wide, {"title": meta.get("title") or "", "subtitle": meta.get("subtitle") or "",
+                                  "points": points, "price": meta.get("price") or "", "label": meta.get("label") or "Ebook PDF",
+                                  "author": meta.get("author") or "", "pages": meta.get("page_count") or 0},
+                    pal, uni, pdf=meta.get("pdf_path"))
+    job["step"], job["pct"] = "Création du visuel carré…", 88
+    square = os.path.join(d, f"{safe}_carre_4K.jpg")
+    KIT.square_visual(cover, square, pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
+    job["step"], job["pct"] = "Création du visuel story 9:16…", 94
+    story = os.path.join(d, f"{safe}_story_9x16_4K.jpg")
+    hook = (copy.get("accroche") or "").strip()
+    KIT.story_visual(cover, story, {"hook": hook if 8 < len(hook) <= 95 else (meta.get("title") or ""),
+                                    "title": meta.get("title") or "", "points": points, "price": meta.get("price") or "",
+                                    "label": meta.get("label") or "Ebook PDF"},
+                     pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
+
+
+HEAVY = threading.Lock()  # petit serveur : jamais deux rendus lourds (visuels 4K / montage vidéo) en même temps
+
+
 def run_kit_job(job, meta, cover_src, about):
     print(f"[kit {job['id']}] « {meta.get('title')} »", flush=True)
     d = os.path.join(BASE, "k_" + job["id"])
@@ -2245,28 +2268,20 @@ def run_kit_job(job, meta, cover_src, about):
         points = [p for p in (meta.get("points") or []) if p][:3] or copy.get("points_forts") or \
             [b[:48] for b in (meta.get("benefits") or [])][:3]
         safe = re.sub(r"[^\w-]+", "_", meta.get("title") or "ebook")[:40].strip("_") or "ebook"
-        job["step"], job["pct"] = "Création du visuel 16:9…", 70
-        wide = os.path.join(d, f"{safe}_16x9.jpg")
-        KIT.wide_visual(cover, wide, {"title": meta.get("title") or "", "subtitle": meta.get("subtitle") or "",
-                                      "points": points, "price": meta.get("price") or "", "label": meta.get("label") or "Ebook PDF",
-                                      "author": meta.get("author") or "", "pages": meta.get("page_count") or 0},
-                        pal, uni, pdf=meta.get("pdf_path"))
-        job["step"], job["pct"] = "Création du visuel carré…", 88
-        square = os.path.join(d, f"{safe}_carre.jpg")
-        KIT.square_visual(cover, square, pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
-        job["step"], job["pct"] = "Création du visuel story 9:16…", 94
-        story = os.path.join(d, f"{safe}_story_9x16.jpg")
-        hook = (copy.get("accroche") or "").strip()
-        KIT.story_visual(cover, story, {"hook": hook if 8 < len(hook) <= 95 else (meta.get("title") or ""),
-                                        "title": meta.get("title") or "", "points": points, "price": meta.get("price") or "",
-                                        "label": meta.get("label") or "Ebook PDF"},
-                         pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
+        if HEAVY.locked():
+            job["step"] = "En attente : un autre rendu est en cours sur le serveur…"
+        HEAVY.acquire()
+        try:
+            _kit_visuals(job, d, safe, cover, meta, pal, uni, points, copy)
+        finally:
+            HEAVY.release()
+        wide, square, story = (os.path.join(d, f"{safe}_{x}.jpg") for x in ("16x9_4K", "carre_4K", "story_9x16_4K"))
         zp = os.path.join(d, f"{safe}_kit.zip")
         with zipfile.ZipFile(zp, "w", zipfile.ZIP_STORED) as z:
             z.write(wide, os.path.basename(wide)); z.write(square, os.path.basename(square))
             z.write(story, os.path.basename(story))
             if copy.get("description"):
-                z.writestr(f"{safe}_description.txt", (copy.get("titre_produit", "") + "\n\n" + copy["description"]
+                z.writestr(f"{safe}_description.txt", (copy.get("titre_produit", "") + "\n\n" + re.sub(r"\*\*(.+?)\*\*", r"\1", copy["description"])
                                                        + ("\n\n" + copy["accroche"] if copy.get("accroche") else "")).encode("utf-8"))
         job.update(kit={"wide": wide, "square": square, "story": story, "zip": zp}, copy=copy)
         job["phase"], job["pct"], job["step"] = "done", 100, "Kit prêt"
@@ -2351,6 +2366,9 @@ def job_kit_file(jid, kind):
     path = k.get(kind)
     if not path or not os.path.exists(path):
         return "Fichier introuvable (le serveur a peut-être redémarré). Relance.", 404
+    prev = path.rsplit(".", 1)[0] + "_apercu.jpg"
+    if request.args.get("prev") == "1" and os.path.exists(prev):
+        return send_file(prev, max_age=600)
     return send_file(path, as_attachment=request.args.get("dl") == "1", download_name=os.path.basename(path), max_age=600)
 
 
@@ -2987,7 +3005,8 @@ def run_clip_job(job):
                 try:
                     if srcs is None or attempt:
                         srcs = clip_sources(job)
-                    render_clip(job, m, path, srcs)
+                    with HEAVY:
+                        render_clip(job, m, path, srcs)
                     safe = safe_name(m["titre"] or job["title"], 50).replace(" ", "_")
                     m.update(status="done", msg="", size=os.path.getsize(path), file=path,
                              name=f"Clip_{m['n']:02d}_{safe}.mp4")

@@ -264,13 +264,23 @@ def mesh_bg(size, pal, dark=True, seed=7):
         d.ellipse([x * w - R, y * h - R, x * w + R, y * h + R], fill=col + (a,))
     lay = lay.filter(ImageFilter.GaussianBlur(max(w, h) * .12))
     im = im.convert("RGBA"); im.alpha_composite(lay)
-    im = im.convert("RGB").resize((W, H), Image.BICUBIC)
-    arr = np.asarray(im).astype(np.float32)
-    yy, xx = np.mgrid[0:H, 0:W]
-    v = ((xx - W * .6) / W) ** 2 + ((yy - H * .5) / H) ** 2
-    arr *= (1 - np.clip(v * (.9 if dark else .12), 0, .5))[..., None]
-    arr += np.random.default_rng(seed).normal(0, 5.5, (H, W, 1)).astype(np.float32)
-    return Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).convert("RGBA")
+    small = np.asarray(im.convert("RGB")).astype(np.float32)
+    yy, xx = np.mgrid[0:h, 0:w]
+    v = ((xx - w * .6) / w) ** 2 + ((yy - h * .5) / h) ** 2
+    small *= (1 - np.clip(v * (.9 if dark else .12), 0, .5))[..., None]
+    im = Image.fromarray(np.clip(small, 0, 255).astype(np.uint8)).resize((W, H), Image.BICUBIC)
+    arr = np.array(im, dtype=np.uint8)
+    del im
+    rng = np.random.default_rng(seed)
+    for y0 in range(0, H, 256):  # grain ajouté par bandes pour limiter la mémoire
+        band = arr[y0:y0 + 256].astype(np.int16)
+        band += rng.normal(0, 5.5, (band.shape[0], W, 1)).astype(np.int16)
+        np.clip(band, 0, 255, out=band)
+        arr[y0:y0 + 256] = band
+    return Image.fromarray(arr).convert("RGBA")
+
+
+PAGE_SCALE = 2.6  # pages intérieures nettes en 4K
 
 
 def pdf_pages(pdf_path, want=3):
@@ -289,7 +299,7 @@ def pdf_pages(pdf_path, want=3):
                 continue
             scored.append((ink + color, i))
         pick = sorted(i for _, i in sorted(scored, reverse=True)[:want])
-        pages = [pdf[i].render(scale=1.6).to_pil().convert("RGB") for i in pick]
+        pages = [pdf[i].render(scale=PAGE_SCALE).to_pil().convert("RGB") for i in pick]
         pdf.close()
         best = max(range(len(pick)), key=lambda k: dict((i, s) for s, i in scored)[pick[k]]) if pick else 0
         return pages, n, best
@@ -316,18 +326,30 @@ def wrap(draw, text, fnt, maxw):
     return lines
 
 
-def fit_title(draw, text, fname, maxw, maxh, start, upper=False):
+def fit_title(draw, text, fname, maxw, maxh, start, upper=False, k=1):
     text = text.upper() if upper else text
     size = start
-    while size > 30:
+    while size > 30 * k:
         f = font(fname, size)
         lines = wrap(draw, text, f, maxw)
         lh = size * (.95 if upper else 1.08)
         if len(lines) * lh <= maxh and len(lines) <= 4:
             return f, lines, lh
-        size -= 4
-    f = font(fname, 30)
-    return f, wrap(draw, text, f, maxw)[:4], 32
+        size -= 4 * k
+    f = font(fname, 30 * k)
+    return f, wrap(draw, text, f, maxw)[:4], 32 * k
+
+
+def save_hq(canvas, out):
+    import gc
+    """JPEG 4K de haute qualité : couleurs non sous-échantillonnées (texte net) + aperçu léger pour l'écran."""
+    rgb_img = canvas.convert("RGB")
+    rgb_img.save(out, "JPEG", quality=95, subsampling=0, optimize=True, dpi=(300, 300))
+    prev = rgb_img.copy()
+    prev.thumbnail((1400, 1400), Image.LANCZOS)
+    prev.save(out.rsplit(".", 1)[0] + "_apercu.jpg", "JPEG", quality=86, optimize=True)
+    del rgb_img, prev
+    gc.collect()
 
 
 def _unused_bg_from_cover(cover, size, pal, dark=True):
@@ -366,75 +388,80 @@ def _scene(canvas, cover, pages, best, cx, cy, scale, pal, uni, n_pages, label="
 
 
 def wide_visual(cover, out, info, pal, uni="moderne", pdf=None):
-    """Visuel 16:9 pour la boutique : scène produit à droite, titre + promesse + points forts + prix à gauche."""
-    W, H = 1920, 1080
+    """Visuel 16:9 4K (3840×2160) pour la boutique : scène produit à droite, titre + promesse + points forts + prix."""
+    K = 2
+    W, H = 1920 * K, 1080 * K
+    P = lambda v: int(round(v * K))
     canvas = mesh_bg((W, H), pal, dark=True)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
     n = info.get("pages") or n
     _scene(canvas, cover, pages, best, W * .755, H * .52, H * .84, pal, uni, n)
     d = ImageDraw.Draw(canvas)
     acc, main = readable(rgb(pal["accent"])), rgb(pal["main"])
-    x, maxw = 110, int(W * .385)
+    x, maxw = P(110), int(W * .385)
     body, bold = BODY.get(uni, BODY["moderne"])
     upper = uni == "impact"
-    y = 150
+    y = P(150)
     if info.get("author"):
-        d.text((x, 86), info["author"].upper(), font=font(bold, 22), fill=(255, 255, 255, 190))
+        d.text((x, P(86)), info["author"].upper(), font=font(bold, P(22)), fill=(255, 255, 255, 190))
     label = (info.get("label") or "Ebook").upper()
-    lf = font(bold, 24)
-    lw = d.textlength(label, font=lf) + 46
-    d.rounded_rectangle([x, y, x + lw, y + 50], radius=25, fill=acc)
+    lf = font(bold, P(24))
+    lw = d.textlength(label, font=lf) + P(46)
+    d.rounded_rectangle([x, y, x + lw, y + P(50)], radius=P(25), fill=acc)
     tc = (20, 20, 20) if sum(acc) > 380 else (255, 255, 255)
-    d.text((x + 23, y + 25), label, font=lf, fill=tc, anchor="lm")
-    y += 86
-    tf, lines, lh = fit_title(d, info["title"], DISPLAY.get(uni, DISPLAY["moderne"]), maxw, 320, 100 if upper else 80, upper)
+    d.text((x + P(23), y + P(25)), label, font=lf, fill=tc, anchor="lm")
+    y += P(86)
+    tf, lines, lh = fit_title(d, info["title"], DISPLAY.get(uni, DISPLAY["moderne"]), maxw, P(320),
+                              P(100 if upper else 80), upper, K)
     for ln in lines:
         d.text((x, y), ln, font=tf, fill=(255, 255, 255)); y += lh
-    y += 14
+    y += P(14)
     if info.get("subtitle"):
-        sf = font(body, 31)
+        sf = font(body, P(31))
         for ln in wrap(d, info["subtitle"], sf, maxw)[:3]:
-            d.text((x, y), ln, font=sf, fill=(226, 224, 230)); y += 43
-    y += 28
-    bf = font(bold, 29)
+            d.text((x, y), ln, font=sf, fill=(226, 224, 230)); y += P(43)
+    y += P(28)
+    bf = font(bold, P(29))
     for b in (info.get("points") or [])[:3]:
-        cy = y + 20
-        d.ellipse([x, cy - 16, x + 32, cy + 16], fill=acc)
-        d.line([(x + 9, cy), (x + 14, cy + 6), (x + 24, cy - 6)], fill=tc, width=4, joint="curve")
-        ls = wrap(d, b, bf, maxw - 54)[:2]
+        cy = y + P(20)
+        d.ellipse([x, cy - P(16), x + P(32), cy + P(16)], fill=acc)
+        d.line([(x + P(9), cy), (x + P(14), cy + P(6)), (x + P(24), cy - P(6))], fill=tc, width=P(4), joint="curve")
+        ls = wrap(d, b, bf, maxw - P(54))[:2]
         for i, ln in enumerate(ls):
-            d.text((x + 50, y + i * 38), ln, font=bf, fill=(255, 255, 255))
-        y += 38 * len(ls) + 20
-    y = max(y + 14, H - 200)
+            d.text((x + P(50), y + i * P(38)), ln, font=bf, fill=(255, 255, 255))
+        y += P(38) * len(ls) + P(20)
+    y = max(y + P(14), H - P(200))
     cta = "Disponible maintenant"
-    cf = font(bold, 32)
-    cwid = d.textlength(cta, font=cf) + 120
-    d.rounded_rectangle([x, y, x + cwid, y + 82], radius=41, fill=(255, 255, 255))
+    cf = font(bold, P(32))
+    cwid = d.textlength(cta, font=cf) + P(120)
+    d.rounded_rectangle([x, y, x + cwid, y + P(82)], radius=P(41), fill=(255, 255, 255))
     dark_txt = main if sum(main) < 520 else (20, 20, 20)
-    d.text((x + 40, y + 41), cta, font=cf, fill=dark_txt, anchor="lm")
-    ax = x + cwid - 46
-    d.ellipse([ax - 22, y + 19, ax + 22, y + 63], fill=acc)
-    d.line([(ax - 9, y + 41), (ax + 9, y + 41)], fill=tc, width=4)
-    d.line([(ax + 2, y + 33), (ax + 10, y + 41), (ax + 2, y + 49)], fill=tc, width=4, joint="curve")
+    d.text((x + P(40), y + P(41)), cta, font=cf, fill=dark_txt, anchor="lm")
+    ax = x + cwid - P(46)
+    d.ellipse([ax - P(22), y + P(19), ax + P(22), y + P(63)], fill=acc)
+    d.line([(ax - P(9), y + P(41)), (ax + P(9), y + P(41))], fill=tc, width=P(4))
+    d.line([(ax + P(2), y + P(33)), (ax + P(10), y + P(41)), (ax + P(2), y + P(49))], fill=tc, width=P(4), joint="curve")
     if info.get("price"):
-        pf = font(DISPLAY.get(uni, "Poppins-ExtraBold") if uni != "impact" else "BebasNeue-Regular", 60 if uni == "impact" else 46)
-        d.text((x + cwid + 36, y + 41), info["price"], font=pf, fill=(255, 255, 255), anchor="lm")
-    canvas.convert("RGB").save(out, "JPEG", quality=92, optimize=True)
+        pf = font(DISPLAY.get(uni, "Poppins-ExtraBold") if uni != "impact" else "BebasNeue-Regular", P(60 if uni == "impact" else 46))
+        d.text((x + cwid + P(36), y + P(41)), info["price"], font=pf, fill=(255, 255, 255), anchor="lm")
+    save_hq(canvas, out)
 
 
 def square_visual(cover, out, pal, uni="moderne", pdf=None, n_pages=0):
-    """Visuel carré : la scène produit seule, centrée, sur un fond dégradé moderne."""
-    S = 1600
+    """Visuel carré 3000×3000 : la scène produit seule, centrée, sur un fond dégradé moderne."""
+    S = 3000
     dark = uni in ("luxe", "sacre", "impact", "moderne")
     canvas = mesh_bg((S, S), pal, dark=dark, seed=11)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
     _scene(canvas, cover, pages, best, S * .52, S * .52, S * .76, pal, uni, n_pages or n)
-    canvas.convert("RGB").save(out, "JPEG", quality=93, optimize=True)
+    save_hq(canvas, out)
 
 
 def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
-    """Visuel 9:16 (story TikTok / Instagram / Facebook) : accroche, scène produit, bénéfices, « lien dans la bio »."""
-    W, H = 1080, 1920
+    """Visuel story 4K (2160×3840) pour TikTok / Instagram / Facebook : accroche, scène produit, bénéfices, « lien dans la bio »."""
+    K = 2
+    W, H = 1080 * K, 1920 * K
+    P = lambda v: int(round(v * K))
     canvas = mesh_bg((W, H), pal, dark=True, seed=23)
     pages, n, best = pdf_pages(pdf) if pdf else ([], 0, 0)
     n = n_pages or n
@@ -443,65 +470,62 @@ def story_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0):
     tc = (20, 20, 20) if sum(acc) > 380 else (255, 255, 255)
     body, bold = BODY.get(uni, BODY["moderne"])
     upper = uni == "impact"
-    # zone haute (sous la barre de la story) : étiquette + accroche
-    y = 230
+    y = P(230)
     label = (info.get("label") or "Nouvel ebook").upper()
-    lf = font(bold, 30)
-    lw = d.textlength(label, font=lf) + 56
-    d.rounded_rectangle([(W - lw) / 2, y, (W + lw) / 2, y + 60], radius=30, fill=acc)
-    d.text((W / 2, y + 30), label, font=lf, fill=tc, anchor="mm")
-    y += 96
+    lf = font(bold, P(30))
+    lw = d.textlength(label, font=lf) + P(56)
+    d.rounded_rectangle([(W - lw) / 2, y, (W + lw) / 2, y + P(60)], radius=P(30), fill=acc)
+    d.text((W / 2, y + P(30)), label, font=lf, fill=tc, anchor="mm")
+    y += P(96)
     hook = (info.get("hook") or info.get("title") or "").strip()
-    tf, lines, lh = fit_title(d, hook, DISPLAY.get(uni, DISPLAY["moderne"]), W - 150, 300, 96 if upper else 74, upper)
+    tf, lines, lh = fit_title(d, hook, DISPLAY.get(uni, DISPLAY["moderne"]), W - P(150), P(300),
+                              P(96 if upper else 74), upper, K)
     for ln in lines[:4]:
         d.text((W / 2, y), ln, font=tf, fill=(255, 255, 255), anchor="ma"); y += lh
-    top_end = y
-    # scène produit
-    scene_cy = top_end + 395
+    scene_cy = y + P(395)
     _scene(canvas, cover, pages, best, W * .51, scene_cy, W * .76, pal, uni, n)
     d = ImageDraw.Draw(canvas)
-    # bénéfices
     y = scene_cy + W * .76 * .46
-    bf = font(bold, 36)
+    bf = font(bold, P(36))
     pts = (info.get("points") or [])[:3]
     if pts:
-        widths = [min(W - 220, d.textlength(p, font=bf)) for p in pts]
-        x = int((W - (max(widths) + 56)) / 2)
+        widths = [min(W - P(220), d.textlength(p, font=bf)) for p in pts]
+        x = int((W - (max(widths) + P(56))) / 2)
         for p in pts:
-            cy = y + 24
-            d.ellipse([x, cy - 19, x + 38, cy + 19], fill=acc)
-            d.line([(x + 10, cy), (x + 16, cy + 7), (x + 28, cy - 7)], fill=tc, width=5, joint="curve")
-            ln = wrap(d, p, bf, W - 220)[0]
-            d.text((x + 56, y + 2), ln, font=bf, fill=(255, 255, 255))
-            y += 62
-    # prix
+            cy = y + P(24)
+            d.ellipse([x, cy - P(19), x + P(38), cy + P(19)], fill=acc)
+            d.line([(x + P(10), cy), (x + P(16), cy + P(7)), (x + P(28), cy - P(7))], fill=tc, width=P(5), joint="curve")
+            d.text((x + P(56), y + P(2)), wrap(d, p, bf, W - P(220))[0], font=bf, fill=(255, 255, 255))
+            y += P(62)
     if info.get("price"):
-        y += 18
-        pf = font("BebasNeue-Regular" if upper else DISPLAY.get(uni, "Poppins-ExtraBold"), 84 if upper else 64)
+        y += P(18)
+        pf = font("BebasNeue-Regular" if upper else DISPLAY.get(uni, "Poppins-ExtraBold"), P(84 if upper else 64))
         d.text((W / 2, y), info["price"], font=pf, fill=(255, 255, 255), anchor="ma")
-        y += 84 if upper else 78
-    # appel à l'action « lien dans la bio » (au-dessus de la zone des boutons de l'appli)
-    cy0 = max(y + 30, H - 500)
+        y += P(84 if upper else 78)
+    cy0 = max(y + P(30), H - P(500))
     cta = "LIEN DANS LA BIO"
-    cf = font(bold, 46)
-    cw = d.textlength(cta, font=cf) + 200
+    cf = font(bold, P(46))
+    cw = d.textlength(cta, font=cf) + P(200)
     x0, x1 = (W - cw) / 2, (W + cw) / 2
-    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(glow).rounded_rectangle([x0 - 10, cy0 - 10, x1 + 10, cy0 + 120], radius=70, fill=acc + (150,))
-    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(26)))
+    # halo lumineux calculé en petit puis agrandi (rapide et léger en mémoire)
+    gw, gh = W // 8, H // 8
+    glow = Image.new("RGBA", (gw, gh), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rounded_rectangle([(x0 - P(10)) / 8, (cy0 - P(10)) / 8, (x1 + P(10)) / 8, (cy0 + P(120)) / 8],
+                                           radius=P(70) / 8, fill=acc + (150,))
+    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(P(26) / 8)).resize((W, H), Image.BICUBIC))
     d = ImageDraw.Draw(canvas)
-    d.rounded_rectangle([x0, cy0, x1, cy0 + 110], radius=55, fill=(255, 255, 255))
+    d.rounded_rectangle([x0, cy0, x1, cy0 + P(110)], radius=P(55), fill=(255, 255, 255))
     ink = main if sum(main) < 520 else (20, 20, 20)
-    ax, ay = x0 + 66, cy0 + 55
+    ax, ay = x0 + P(66), cy0 + P(55)
     dot = acc if sum(acc) < 600 else main
     tc = (20, 20, 20) if sum(dot) > 380 else (255, 255, 255)
-    d.ellipse([ax - 34, ay - 34, ax + 34, ay + 34], fill=dot)
-    d.line([(ax, ay + 17), (ax, ay - 17)], fill=tc, width=6)
-    d.line([(ax - 13, ay - 4), (ax, ay - 18), (ax + 13, ay - 4)], fill=tc, width=6, joint="curve")
-    d.text((ax + 52, ay), cta, font=cf, fill=ink, anchor="lm")
+    d.ellipse([ax - P(34), ay - P(34), ax + P(34), ay + P(34)], fill=dot)
+    d.line([(ax, ay + P(17)), (ax, ay - P(17))], fill=tc, width=P(6))
+    d.line([(ax - P(13), ay - P(4)), (ax, ay - P(18)), (ax + P(13), ay - P(4))], fill=tc, width=P(6), joint="curve")
+    d.text((ax + P(52), ay), cta, font=cf, fill=ink, anchor="lm")
     sub = info.get("cta_sub") or "Clique et télécharge-le tout de suite"
-    d.text((W / 2, cy0 + 146), sub, font=font(body, 32), fill=(236, 234, 240), anchor="ma")
-    canvas.convert("RGB").save(out, "JPEG", quality=92, optimize=True)
+    d.text((W / 2, cy0 + P(146)), sub, font=font(body, P(32)), fill=(236, 234, 240), anchor="ma")
+    save_hq(canvas, out)
 
 
 def cover_from_upload(path, out):

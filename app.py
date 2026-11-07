@@ -2816,6 +2816,8 @@ def ff_input(u, hd, s, d, extra=()):
         a += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
         if hd:
             a += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in hd.items())]
+    if LIGHT:  # petit serveur : un seul fil de décodage (chaque fil réserve ses propres images en mémoire)
+        a += ["-threads", "1"]
     return a + list(extra) + ["-ss", f"{s:.3f}", "-t", f"{d:.3f}", "-i", u]
 
 
@@ -2959,6 +2961,8 @@ def render_clip(job, m, path, src_info):
     for u, hd in srcs:
         cmd += ff_input(u, hd, m["s"], d)
     audio = "1:a:0" if len(srcs) > 1 else "0:a:0?"
+    if LIGHT:
+        cmd += ["-filter_complex_threads", "1", "-filter_threads", "1"]
     cmd += ["-filter_complex", fc, "-map", "[v]", "-map", audio,
             "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:v", "libx264", "-preset", "superfast" if LIGHT else "veryfast", "-crf", "23" if LIGHT else "22",
             *(["-x264-params", "rc-lookahead=8:ref=1"] if LIGHT else []),

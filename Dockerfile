@@ -10,5 +10,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -U -r requirements.txt
 COPY . .
 
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 MALLOC_ARENA_MAX=2
 CMD gunicorn -w 1 --threads 4 --timeout 120 -b 0.0.0.0:${PORT:-10000} app:app

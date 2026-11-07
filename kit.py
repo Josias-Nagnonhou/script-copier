@@ -313,7 +313,7 @@ def mesh_bg(size, pal, dark=True, seed=7):
     rng = np.random.default_rng(seed)
     for y0 in range(0, H, 256):  # grain ajouté par bandes pour limiter la mémoire
         band = arr[y0:y0 + 256].astype(np.int16)
-        band += rng.normal(0, 5.5, (band.shape[0], W, 1)).astype(np.int16)
+        band += rng.normal(0, 2.6, (band.shape[0], W, 1)).astype(np.int16)
         np.clip(band, 0, 255, out=band)
         arr[y0:y0 + 256] = band
     return Image.fromarray(arr).convert("RGBA")
@@ -380,11 +380,20 @@ def fit_title(draw, text, fname, maxw, maxh, start, upper=False, k=1):
     return f, wrap(draw, text, f, maxw)[:4], 32 * k
 
 
+MAX_BYTES = int(1.8 * 1024 * 1024)
+
+
 def save_hq(canvas, out):
     import gc
     """JPEG 4K de haute qualité : couleurs non sous-échantillonnées (texte net) + aperçu léger pour l'écran."""
     rgb_img = canvas.convert("RGB")
-    rgb_img.save(out, "JPEG", quality=95, subsampling=0, optimize=True, dpi=(300, 300))
+    # 4K mais léger : on baisse la compression petit à petit jusqu'à passer sous ~1,8 Mo
+    for q in (93, 90, 88, 86, 84, 82):
+        rgb_img.save(out, "JPEG", quality=q, subsampling=0, optimize=True, progressive=True, dpi=(300, 300))
+        if os.path.getsize(out) <= MAX_BYTES:
+            break
+    else:
+        rgb_img.save(out, "JPEG", quality=85, subsampling=2, optimize=True, progressive=True, dpi=(300, 300))
     prev = rgb_img.copy()
     prev.thumbnail((1400, 1400), Image.LANCZOS)
     prev.save(out.rsplit(".", 1)[0] + "_apercu.jpg", "JPEG", quality=86, optimize=True)

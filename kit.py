@@ -353,7 +353,9 @@ def wrap(draw, text, fnt, maxw):
         text = clean(text)
     except Exception:
         pass
-    words, lines, cur = text.split(), [], ""
+    text = re.sub(r"(\d)[ \u202f\xa0](?=\d{3}\b)", "\\1\x00", text)
+    text = re.sub(r"(\d)[ \xa0](?=(?:FCFA|F|€|EUR|\$)\b)", "\\1\x00", text)
+    words, lines, cur = [w.replace("\x00", " ") for w in text.split()], [], ""
     for w in words:
         t = (cur + " " + w).strip()
         if draw.textlength(t, font=fnt) <= maxw or not cur:
@@ -455,7 +457,7 @@ def _scene(canvas, cover, pages, best, cx, cy, scale, pal, uni, n_pages, label="
     _contact(canvas, bx, ground, book.width * .98)
     if n_pages:
         bd = badge(S * .16, label, f"{n_pages} pages", acc, badge_font or DISPLAY.get("impact"), -12)
-        place(canvas, bd, bx - book.width * .5, ground - S * .05, 0, shadow=110)
+        place(canvas, bd, bx - book.width * .58, ground - S * .12, 0, shadow=110)
 
 
 def _contact(canvas, x, y, w):
@@ -648,7 +650,7 @@ def bio_square_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0)
     # promesse en haut (petite, élégante)
     y = P(64)
     hook = (info.get("hook") or info.get("title") or "").strip()
-    tf, lines, lh = fit_title(d, hook, disp, S - P(200), P(130), P(50 * fp["scale"]), upper, K)
+    tf, lines, lh = fit_title(d, hook, disp, S - P(220), P(150), P(58 * fp["scale"]), upper, K)
     for ln in lines[:2]:
         d.text((S / 2, y), ln, font=tf, fill=(255, 255, 255), anchor="ma"); y += lh
     # bloc d'appel en bas : « Clique sur le lien » / « en bio » + flèche, puis réassurance
@@ -666,9 +668,9 @@ def bio_square_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0)
     y2 = ry - P(62) - h2                            # « en bio »
     y1 = y2 - P(18) - h1                            # « Clique sur le lien »
     # produit : remplit l'espace entre la promesse et l'appel
-    t, bt = y + P(64), y1 - P(46)
-    sc = max(S * .45, min((bt - t) / .97, S * .72))
-    scene_cy = (t + bt) / 2 - .055 * sc
+    t, bt = y + P(44), y1 - P(78)
+    sc = max(S * .45, min((bt - t) / .88, S * .9))
+    scene_cy = t + .44 * sc                  # le haut du livre démarre juste sous le titre
     _scene(canvas, cover, pages, best, S * .5, scene_cy, sc, pal, uni, n, badge_font=disp)
     # pastille prix
     if info.get("price"):
@@ -684,7 +686,7 @@ def bio_square_visual(cover, out, info, pal, uni="moderne", pdf=None, n_pages=0)
         g.text((R + 4, R + 4 - (P(13) if cur else 0)), num, font=nf, fill=tc, anchor="mm")
         if cur:
             g.text((R + 4, R + 4 + P(30)), cur.upper(), font=font(bold, P(18)), fill=tc, anchor="mm")
-        place(canvas, _rot(st, -10), S * .5 + sc * .34, scene_cy - sc * .30, 0, shadow=150)
+        place(canvas, _rot(st, -10), S * .5 + sc * .38, scene_cy - sc * .14, 0, shadow=150)
     d = ImageDraw.Draw(canvas)
     # ligne 1, blanche
     d.text((S / 2, y1 - b1[1]), l1, font=f1, fill=(255, 255, 255), anchor="ma")

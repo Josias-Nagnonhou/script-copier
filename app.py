@@ -2268,7 +2268,7 @@ def _kit_visuals(job, d, safe, cover, meta, pal, uni, points, copy):
                      pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
     job["step"], job["pct"] = "Création du visuel « lien en bio »…", 97
     bio = os.path.join(d, f"{safe}_lien_en_bio_4K.jpg")
-    KIT.bio_square_visual(cover, bio, {"hook": hook if 8 < len(hook) <= 70 else (meta.get("title") or ""),
+    KIT.bio_square_visual(cover, bio, {"hook": meta.get("title") or "",
                                        "title": meta.get("title") or "", "price": meta.get("price") or "", "pair": fp},
                           pal, uni, pdf=meta.get("pdf_path"), n_pages=meta.get("page_count") or 0)
 

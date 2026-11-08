@@ -58,32 +58,32 @@ def register_fonts():
 # Chaque univers a ses polices, sa couverture, ses ouvertures de chapitre, ses encadrés et ses en-têtes.
 STYLES = {
     "moderne": {"label": "Moderne", "display": "Pop-Xb", "head": "Pop-Bd", "sub": "Pop-Sb", "body": "Pop", "it": "Pop-It",
-                "lab": "Pop-Sb", "size": 10.6, "lead": 17.2, "upper": False, "cover": "bleed", "opener": "band",
+                "lab": "Pop-Sb", "size": 11.6, "lead": 19.6, "upper": False, "cover": "bleed", "opener": "band",
                 "callout": "bar", "marker": "dot", "header": "topbar", "quote": "bar",
                 "img": "clean modern editorial illustration, bright natural light, uncluttered background",
                 "for": "argent, business, entrepreneuriat, marketing, technologie, productivité, carrière"},
     "impact": {"label": "Impact", "display": "Bebas", "head": "Archivo", "sub": "Pop-Bd", "body": "Pop", "it": "Pop-It",
-               "lab": "Pop-Bd", "size": 10.6, "lead": 17.2, "upper": True, "cover": "diagonal", "opener": "giant",
+               "lab": "Pop-Bd", "size": 11.6, "lead": 19.6, "upper": True, "cover": "diagonal", "opener": "giant",
                "callout": "block", "marker": "square", "header": "sidebar", "quote": "big",
                "img": "dramatic cinematic scene, strong contrast, dynamic energy, bold rim lighting",
                "for": "motivation, discipline, sport, football, mental de gagnant, fitness, défi"},
     "sacre": {"label": "Sacré", "display": "Marc", "head": "Marc", "sub": "Spec-Sb", "body": "Spec", "it": "Spec-It",
-              "lab": "Spec-Sb", "size": 11.4, "lead": 18.4, "upper": False, "cover": "arch", "opener": "centered",
+              "lab": "Spec-Sb", "size": 12.4, "lead": 20.8, "upper": False, "cover": "arch", "opener": "centered",
               "callout": "frame", "marker": "diamond", "header": "centered", "quote": "centered",
               "img": "luminous spiritual painting, soft golden light rays, serene and reverent atmosphere, symbolic",
               "for": "foi chrétienne, islam, prière, psaumes, spiritualité, délivrance, méditation"},
     "luxe": {"label": "Luxe", "display": "DMS", "head": "DMS", "sub": "Lato-Bd", "body": "Lato", "it": "Lato-It",
-             "lab": "Lato-Bd", "size": 10.8, "lead": 17.6, "upper": False, "cover": "medallion", "opener": "dark",
+             "lab": "Lato-Bd", "size": 11.8, "lead": 20.0, "upper": False, "cover": "medallion", "opener": "dark",
              "callout": "frame", "marker": "diamond", "header": "gold", "quote": "centered",
              "img": "mysterious elegant dark atmosphere, deep shadows, glowing gold highlights, cinematic depth",
              "for": "mystère, ésotérisme, secrets, sociétés secrètes, occulte, luxe, haut de gamme"},
     "doux": {"label": "Doux", "display": "DMS", "head": "DMS", "sub": "Lato-Bd", "body": "Lato", "it": "Lato-It",
-             "lab": "Lato-Bd", "size": 10.9, "lead": 17.8, "upper": False, "cover": "card", "opener": "rounded",
+             "lab": "Lato-Bd", "size": 11.9, "lead": 20.2, "upper": False, "cover": "card", "opener": "rounded",
              "callout": "soft", "marker": "circle", "header": "dot", "quote": "soft",
              "img": "soft warm pastel illustration, gentle diffused light, tender and comforting mood",
              "for": "couple, famille, maternité, santé, bien-être, beauté, cuisine, développement personnel doux"},
     "editorial": {"label": "Éditorial", "display": "Abril", "head": "DMS", "sub": "Spec-Sb", "body": "Spec", "it": "Spec-It",
-                  "lab": "Spec-Sb", "size": 11.2, "lead": 18.2, "upper": False, "cover": "magazine", "opener": "split",
+                  "lab": "Spec-Sb", "size": 12.2, "lead": 20.6, "upper": False, "cover": "magazine", "opener": "split",
                   "callout": "rule", "marker": "dash", "header": "running", "quote": "bar",
                   "img": "rich documentary painting, textured oil paint look, historical atmosphere, warm tones",
                   "for": "histoire, culture africaine, contes, biographies, éducation, langues, savoirs"},
@@ -397,7 +397,7 @@ FORMAT_RULES = (
 
 def gen_plan(chat, ctx, pages):
     n_ch = max(4, min(20, round(pages / 5.5)))
-    n_sec = max(3, min(8, round(pages * 230 / n_ch / 900)))  # parties par chapitre : ~900 mots chacune
+    n_sec = max(3, min(8, round(pages * 190 / n_ch / 900)))  # parties par chapitre : ~900 mots chacune
     system = ("Tu es un éditeur expert en ebooks qui se vendent bien auprès des audiences francophones africaines "
               "et de la diaspora. Tu conçois des guides pratiques qui tiennent leur promesse. " + STYLE_RULES)
     title_rule = (f"Le titre est IMPOSÉ par l'auteur : « {ctx['title']} ». Mets exactement ce titre dans « titre », sans le modifier, "
@@ -783,6 +783,57 @@ class Marker(Flowable):
             c.circle(3.5, y, 2.8, stroke=0, fill=1)
 
 
+class NotesFill(Flowable):
+    """Remplit l'espace libre en fin de chapitre : récap des parties + lignes pour prendre des notes."""
+    def __init__(self, title, items, main, light, ink, fhead, fbody, full_h, min_h=125):
+        super().__init__()
+        self.title, self.items = title, [i for i in items if i][:6]
+        self.main, self.light, self.ink, self.fh, self.fb = main, light, ink, fhead, fbody
+        self.full_h, self.min_h, self.h = full_h, min_h, 0
+
+    def wrap(self, aw, ah):
+        self.w = aw
+        # rien si la place est trop petite, ou si on est en haut d'une page neuve (pas de page entière de notes)
+        self.h = ah - 6 if self.min_h <= ah <= self.full_h * .86 else 0
+        return aw, self.h
+
+    def draw(self):
+        if not self.h:
+            return
+        c, w, h = self.canv, self.w, self.h
+        top = h - 14
+        c.setFillColor(self.light)
+        c.roundRect(0, 0, w, top, 14, stroke=0, fill=1)
+        y = top - 30
+        c.setFillColor(self.main)
+        c.setFont(self.fh, 10.5)
+        c.drawString(20, y, self.title.upper())
+        y -= 24
+        c.setFont(self.fb, 11)
+        for it in self.items:
+            if y < 70:
+                break
+            c.setFillColor(self.main)
+            c.circle(25, y + 3.6, 3.2, stroke=0, fill=1)
+            c.setFillColor(self.ink)
+            txt = it if c.stringWidth(it, self.fb, 11) < w - 70 else it[:int(len(it) * (w - 90) / c.stringWidth(it, self.fb, 11))] + "…"
+            c.drawString(38, y, txt)
+            y -= 20
+        if y > 70:
+            y -= 10
+            c.setFillColor(self.main)
+            c.setFont(self.fh, 10.5)
+            c.drawString(20, y, "MES NOTES")
+            y -= 26
+            c.setStrokeColor(self.main)
+            c.setStrokeAlpha(.22)
+            c.setLineWidth(.7)
+            while y > 22:
+                c.line(20, y, w - 20, y)
+                y -= 24
+            c.setStrokeAlpha(1)
+
+
 class NumBadge(Flowable):
     def __init__(self, n, color, font, shape="circle", lead=16, text_color=colors.white):
         super().__init__()
@@ -878,10 +929,29 @@ class GhostNumber(Flowable):
         c.drawString(0, 6, f"CHAPITRE {self.n:02d}")
 
 
+def _toc_in(f):
+    """Titre de sommaire, même placé dans un tableau (ouvertures « rounded » et « split »)."""
+    if isinstance(f, Paragraph):
+        return getattr(f, "_toc", None)
+    if isinstance(f, (list, tuple)):
+        for x in f:
+            t = _toc_in(x)
+            if t:
+                return t
+    cells = getattr(f, "_cellvalues", None)
+    if cells:
+        for row in cells:
+            t = _toc_in(list(row))
+            if t:
+                return t
+    return None
+
+
 class Doc(BaseDocTemplate):
     def afterFlowable(self, f):
-        if isinstance(f, Paragraph) and getattr(f, "_toc", None):
-            self.notify("TOCEntry", (0, f._toc, self.page))
+        t = _toc_in(f)
+        if t:
+            self.notify("TOCEntry", (0, t, self.page))
 
 
 ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV", "XV"]
@@ -916,7 +986,7 @@ def _build_pdf(book, path):
     INK, MUTED = colors.HexColor("#1D1B19"), colors.HexColor("#6E6A64")
     PAPER = colors.HexColor("#FFFFFF")
     W, H = A4
-    M = 2.1 * cm
+    M = 1.95 * cm
     CW = W - 2 * M
     title = plain(book["titre"])
     up = (lambda t: t.upper()) if S["upper"] else (lambda t: t)
@@ -924,15 +994,15 @@ def _build_pdf(book, path):
     author = plain(book.get("auteur") or "")
 
     st = {
-        "body": ParagraphStyle("body", fontName=S["body"], fontSize=S["size"], leading=S["lead"], textColor=INK, spaceAfter=7.5),
-        "h2": ParagraphStyle("h2", fontName=S["head"], fontSize=14.5 if S["head"] == "Archivo" else 17 if S["head"] in ("DMS", "Marc") else 15.5,
-                             leading=21, textColor=DARK if uni != "impact" else colors.HexColor("#111111"), spaceBefore=15, spaceAfter=7),
-        "h3": ParagraphStyle("h3", fontName=S["sub"], fontSize=12.2, leading=16, textColor=MAIN, spaceBefore=9, spaceAfter=5),
+        "body": ParagraphStyle("body", fontName=S["body"], fontSize=S["size"], leading=S["lead"], textColor=INK, spaceAfter=9),
+        "h2": ParagraphStyle("h2", fontName=S["head"], fontSize=17.5 if S["head"] == "Archivo" else 21 if S["head"] in ("DMS", "Marc") else 19.5,
+                             leading=25, textColor=DARK if uni != "impact" else colors.HexColor("#111111"), spaceBefore=18, spaceAfter=9),
+        "h3": ParagraphStyle("h3", fontName=S["sub"], fontSize=13.6, leading=18, textColor=MAIN, spaceBefore=11, spaceAfter=6),
         "li": ParagraphStyle("li", fontName=S["body"], fontSize=S["size"], leading=S["lead"] - .6, textColor=INK),
         "quote": ParagraphStyle("quote", fontName=S["it"], fontSize=13, leading=20, textColor=DARK),
         "qsrc": ParagraphStyle("qsrc", fontName=S["lab"], fontSize=9, leading=12, textColor=MAIN, spaceBefore=4),
         "eyebrow": ParagraphStyle("eyebrow", fontName=S["lab"], fontSize=8.6, leading=11, textColor=MAIN, spaceAfter=4),
-        "ctitle": ParagraphStyle("ctitle", fontName=S["display"], fontSize=40 if uni == "impact" else 27, leading=40 if uni == "impact" else 32,
+        "ctitle": ParagraphStyle("ctitle", fontName=S["display"], fontSize=48 if uni == "impact" else 33, leading=47 if uni == "impact" else 38,
                                  textColor=DARK, spaceAfter=6),
         "obj": ParagraphStyle("obj", fontName=S["it"], fontSize=11, leading=16.5, textColor=MUTED),
         "ctl": ParagraphStyle("ctl", fontName=S["lab"], fontSize=9.6, leading=13, textColor=MAIN, spaceAfter=3),
@@ -941,7 +1011,7 @@ def _build_pdf(book, path):
         "td": ParagraphStyle("td", fontName=S["body"], fontSize=9.4, leading=13, textColor=INK),
         "big": ParagraphStyle("big", fontName=S["display"], fontSize=30 if uni == "impact" else 24, leading=31 if uni == "impact" else 29,
                               textColor=DARK, spaceAfter=10),
-        "toc": ParagraphStyle("toc", fontName=S["sub"], fontSize=11.5, leading=17, textColor=INK, spaceAfter=6),
+        "toc": ParagraphStyle("toc", fontName=S["sub"], fontSize=14, leading=20, textColor=INK, spaceAfter=13),
     }
     center = lambda s, **kw: ParagraphStyle(s.name + "c", parent=s, alignment=TA_CENTER, **kw)
 
@@ -1154,6 +1224,8 @@ def _build_pdf(book, path):
 
     def callout(kind, ttl, body_blocks):
         label = CALLOUTS.get(kind, "Astuce")
+        if ttl and plain(ttl).strip(" :.").lower() in (label.lower(), kind.lower()):
+            ttl = ""  # évite « À RETENIR · À retenir »
         warn = kind == "attention"
         style = S["callout"]
         if style == "block":
@@ -1334,7 +1406,7 @@ def _build_pdf(book, path):
                         colWidths=[1.6 * cm], rowHeights=[1.6 * cm])
             num.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), LIGHT), ("ROUNDEDCORNERS", [23, 23, 23, 23]),
                                      ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 0)]))
-            head = Table([[num, [eyebrow(f"Chapitre {k}"), heading_toc(ch["titre"], ParagraphStyle("rt", parent=st["ctitle"], fontSize=25, leading=29))]]],
+            head = Table([[num, [eyebrow(f"Chapitre {k}"), heading_toc(ch["titre"], ParagraphStyle("rt", parent=st["ctitle"], fontSize=30, leading=35))]]],
                          colWidths=[2.1 * cm, CW - 2.1 * cm])
             head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
             out = [head]
@@ -1344,8 +1416,8 @@ def _build_pdf(book, path):
                 out += [Spacer(1, .5 * cm), ShapedImage(img, CW, 8 * cm, "round", CW)]
             return [PageBreak()] + out + [Spacer(1, .55 * cm)]
         if o == "split":
-            num = Paragraph(f"{k:02d}", ParagraphStyle("sn", fontName="Abril", fontSize=64, leading=64, textColor=MAIN))
-            right = [eyebrow(f"Chapitre {k}"), heading_toc(ch["titre"], ParagraphStyle("st", parent=st["ctitle"], fontSize=26, leading=30))]
+            num = Paragraph(f"{k:02d}", ParagraphStyle("sn", fontName="Abril", fontSize=84, leading=84, textColor=MAIN))
+            right = [eyebrow(f"Chapitre {k}"), heading_toc(ch["titre"], ParagraphStyle("st", parent=st["ctitle"], fontSize=31, leading=36))]
             if obj:
                 right.append(Paragraph(obj, st["obj"]))
             head = Table([[num, right]], colWidths=[3.3 * cm, CW - 3.3 * cm])
@@ -1359,7 +1431,7 @@ def _build_pdf(book, path):
                 out.append(cap)
             return [PageBreak()] + out + [Spacer(1, .55 * cm)]
         # band (moderne)
-        out = [Paragraph(f"{k:02d}", ParagraphStyle("cn", fontName="Pop-Xb", fontSize=54, leading=56, textColor=MAIN)),
+        out = [Paragraph(f"{k:02d}", ParagraphStyle("cn", fontName="Pop-Xb", fontSize=96, leading=100, textColor=MAIN, spaceAfter=6)),
                eyebrow(f"Chapitre {k}"), heading_toc(ch["titre"], st["ctitle"])]
         if obj:
             out.append(Paragraph("Objectif : " + obj, st["obj"]))
@@ -1378,31 +1450,77 @@ def _build_pdf(book, path):
     story = [NextPageTemplate("page"), PageBreak()]
     story += [Spacer(1, 1.2 * cm), eyebrow("Ce guide est pour toi si…"), Paragraph(inline(book.get("pour_qui") or ""), st["big"]), Spacer(1, .3 * cm)]
     if book.get("benefices"):
-        story += [Paragraph(up("Ce que tu vas obtenir"), st["h2"])] + bullets(book["benefices"], check=False)
+        story += [Spacer(1, .4 * cm), Paragraph(up("Ce que tu vas obtenir"), st["h2"]), Spacer(1, .15 * cm)]
+        cards = []
+        for i, b in enumerate(book["benefices"][:6], 1):
+            cards.append([Paragraph(f"{i:02d}", ParagraphStyle("bn", fontName=S["display"], fontSize=26, leading=28, textColor=MAIN)),
+                          Spacer(1, 4), Paragraph(inline(b), ParagraphStyle("bt", fontName=S["sub"], fontSize=12.5, leading=17, textColor=DARK))])
+        ncol = 3 if len(cards) % 3 == 0 or len(cards) > 4 else 2
+        rows = [cards[i:i + ncol] + [""] * (ncol - len(cards[i:i + ncol])) for i in range(0, len(cards), ncol)]
+        gt = Table(rows, colWidths=[CW / ncol] * ncol)
+        cmds = [("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 14), ("BOTTOMPADDING", (0, 0), (-1, -1), 16),
+                ("LEFTPADDING", (0, 0), (-1, -1), 14), ("RIGHTPADDING", (0, 0), (-1, -1), 12)]
+        for r_ in range(len(rows)):
+            for c_ in range(ncol):
+                if rows[r_][c_] != "":
+                    cmds.append(("BACKGROUND", (c_, r_), (c_, r_), LIGHT))
+        cmds.append(("LINEAFTER", (0, 0), (-2, -1), 6, colors.white))
+        cmds.append(("LINEBELOW", (0, 0), (-1, -2), 6, colors.white))
+        gt.setStyle(TableStyle(cmds))
+        story.append(gt)
+    steps = [("Lis un chapitre à la fois", "Prends ton temps : un chapitre par jour suffit pour avancer vraiment."),
+             ("Fais les exercices", "Les encadrés « exercice » transforment la lecture en résultats concrets."),
+             ("Note tes déclics", "À la fin de chaque chapitre, un espace t'attend pour écrire ce que tu retiens.")]
+    story += [Spacer(1, .7 * cm), Paragraph(up("Comment profiter de ce guide"), st["h2"]), Spacer(1, .1 * cm)]
+    srows = []
+    for i, (t, d) in enumerate(steps, 1):
+        srows.append([Paragraph(str(i), ParagraphStyle("sn2", fontName=S["display"], fontSize=22, leading=24, textColor=colors.white, alignment=TA_CENTER)),
+                      [Paragraph(inline(t), ParagraphStyle("st2", fontName=S["sub"], fontSize=12.5, leading=16, textColor=DARK)),
+                       Paragraph(inline(d), ParagraphStyle("sd2", parent=st["body"], fontSize=S["size"] - .6, leading=S["lead"] - 2, spaceAfter=0, textColor=MUTED))]])
+    stt = Table(srows, colWidths=[1.25 * cm, CW - 1.25 * cm])
+    stt.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("BACKGROUND", (0, 0), (0, -1), MAIN),
+                             ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                             ("LEFTPADDING", (1, 0), (1, -1), 14), ("LINEBELOW", (0, 0), (-1, -2), 5, colors.white),
+                             ("BACKGROUND", (1, 0), (1, -1), LIGHT)]))
+    story.append(stt)
     legal = (f"© {datetime.date.today().year} {author}. Tous droits réservés. "
              "Ce guide est réservé à son acheteur : merci de ne pas le partager ni le revendre.")
     if book.get("avertissement"):
         legal += " " + plain(book["avertissement"])
-    story += [Spacer(1, 1.4 * cm), Paragraph(inline(legal), ParagraphStyle("legal", parent=st["body"], fontSize=8.4, leading=12.5, textColor=MUTED))]
+    story += [Spacer(1, .9 * cm), Paragraph(inline(legal), ParagraphStyle("legal", parent=st["body"], fontSize=8.4, leading=12.5, textColor=MUTED))]
     toc = TableOfContents()
     toc.levelStyles = [st["toc"]]
     toc.dotsMinLevel = 0
-    story += [PageBreak(), eyebrow("Sommaire"), Paragraph(up("Au programme"), st["big"]), Spacer(1, .2 * cm), toc]
+    story += [PageBreak(), eyebrow("Sommaire"), Paragraph(up("Au programme"), st["big"]), Spacer(1, .5 * cm), toc,
+              Spacer(1, .5 * cm), NotesFill("Mon objectif en lisant ce guide", [], MAIN, LIGHT, INK, S["lab"], S["body"], H - 4.3 * cm)]
     story += [PageBreak()] + section_head("Introduction", "Avant de commencer")
     for b in parse_md(book.get("intro", "")):
         story += render(b)
+    _INTRO_END = len(story)
+    FH = H - 4.3 * cm
+
+    def notes(title, blocks):
+        heads = [plain(b["text"]) for b in blocks if b.get("t") == "h2"]
+        return [Spacer(1, .4 * cm), NotesFill(title, heads, MAIN, LIGHT, INK, S["lab"], S["body"], FH)]
+
+    story += notes("Ce que tu attends de ce livre", [])
     for k, ch in enumerate(book["chapitres"], 1):
         story += opener(k, ch)
-        for b in parse_md(ch.get("texte", "")):
+        blocks = parse_md(ch.get("texte", ""))
+        for b in blocks:
             story += render(b)
+        story += notes(f"Ce que tu retiens · chapitre {k}", blocks)
     if book.get("bonus_texte"):
         story += [PageBreak()] + section_head("Bonus", book.get("bonus_titre") or "Ton plan d'action")
-        for b in parse_md(book["bonus_texte"]):
+        bb = parse_md(book["bonus_texte"])
+        for b in bb:
             story += render(b)
+        story += notes("Ton plan à toi", bb)
     if book.get("conclusion"):
         story += [PageBreak()] + section_head("Conclusion", "Et maintenant ?")
         for b in parse_md(book["conclusion"]):
             story += render(b)
+        story += notes("Mes engagements", [])
     credits = [c for c in book.get("credits") or [] if c.get("name")]
     if credits:
         bits = []

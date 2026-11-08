@@ -1956,7 +1956,7 @@ def run_ebook_job(job, ctx):
         chs = plan["chapitres"]
         job["toc"] = [c["titre"] for c in chs]
         job["book_title"] = plan.get("titre") or ctx["title"]
-        total = job["pages"] * 230
+        total = job["pages"] * 190
         w_intro, w_bonus, w_concl = 380, max(300, min(900, total // 12)), 320
         w_ch = max(500, (total - w_intro - w_bonus - w_concl) // len(chs))
         steps = len(chs) + 3 + (len(chs) + 1 if job["images"] else 0)

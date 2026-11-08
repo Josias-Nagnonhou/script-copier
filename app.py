@@ -567,7 +567,8 @@ def job_status(jid):
                    part=j.get("part", 0), parts=j.get("parts", 0), duration=j.get("duration", 0),
                    zip_size=j.get("zip_size", 0), step=j.get("step", ""), pct=j.get("pct", 0),
                    resumable=j.get("resumable", False), paused=j.get("paused", False),
-                   written=_written(j), total_ch=len(((j.get("st") or {}).get("plan") or {}).get("chapitres") or []))
+                   written=_written(j), total_ch=len(((j.get("st") or {}).get("plan") or {}).get("chapitres") or []),
+                   outs=sorted((j.get("out") or {}).keys()) if j.get("platform") == "clean" else [])
 
 
 def _written(j):
@@ -2487,6 +2488,138 @@ def job_audio_file(jid, kind):
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
+# ------------------------------------------------ nettoyage audio (retirer la musique, garder la voix)
+import voiceclean as VC
+
+
+def _hms(t):
+    t = int(max(0, t))
+    h, m = divmod(t, 3600)
+    m, s = divmod(m, 60)
+    return f"{h} h {m:02d}" if h else f"{m} min {s:02d} s" if m else f"{s} s"
+
+
+def run_clean_job(job, src):
+    print(f"[nettoyage {job['id']}] « {job['source_name']} »", flush=True)
+    try:
+        if not src:  # lien : on récupère seulement le son
+            job["step"] = "Téléchargement du son…"
+            d = job["dir"]
+            with yt_dlp.YoutubeDL(ydl_opts(job["site"], format="bestaudio/best",
+                                           outtmpl=os.path.join(d, "src.%(ext)s"))) as y:
+                info = y.extract_info(job["url"], download=True)
+            job["source_name"] = (info.get("title") or job["source_name"])[:120]
+            media = [f for f in glob.glob(os.path.join(d, "src.*")) if not f.endswith(".part")]
+            if not media:
+                raise RuntimeError("Le son de ce lien n'a pas pu être téléchargé.")
+            src = media[0]
+        dur, has_video = VC.probe(src)
+        if dur <= 0:
+            raise RuntimeError("Ce fichier ne contient pas de son lisible.")
+        if dur > 4 * 3600 + 60:
+            raise RuntimeError("Fichier trop long : 4 heures maximum.")
+        job["duration"] = dur
+        job["phase"] = "transcribing"
+        job["step"] = f"Nettoyage de {_hms(dur)} d'audio…"
+        print(f"[nettoyage {job['id']}] durée {_hms(dur)}, vidéo={has_video}", flush=True)
+
+        def prog(done, total, el):
+            job["pct"] = round(2 + 93 * done / max(total, 1), 1)
+            left = el / max(done, 1) * (total - done)
+            job["step"] = f"Nettoyage : {_hms(done)} sur {_hms(total)}" + (
+                f" · encore environ {_hms(left)}" if done > 30 else "")
+            job["eta"] = left
+        base = safe_name(job["source_name"], 70)
+        voice = os.path.join(job["dir"], f"{base} - voix seule.mp3")
+        VC.clean(src, job["dir"], voice, progress=prog, strength=job["strength"], heavy=HEAVY,
+                 cancel=lambda: job.get("cancel"))
+        job["out"] = {"voice": voice}
+        if has_video and job.get("video"):
+            job["step"], job["pct"] = "Remise de la voix propre sur la vidéo…", 97
+            mp4 = os.path.join(job["dir"], f"{base} - voix seule.mp4")
+            try:
+                VC.remux_video(src, voice, mp4)
+                job["out"]["video"] = mp4
+            except Exception as e:
+                print(f"[nettoyage {job['id']}] vidéo non refaite : {e}", flush=True)
+        if src.startswith(job["dir"]):
+            try:
+                os.remove(src)
+            except OSError:
+                pass
+        job["phase"], job["pct"], job["step"] = "done", 100, "Voix nettoyée"
+        print(f"[nettoyage {job['id']}] terminé", flush=True)
+    except Exception as e:
+        job["phase"], job["error"] = "error", ("Nettoyage annulé." if str(e) == "annulé" else str(e)[:400])
+        print(f"[nettoyage {job['id']}] erreur : {e}", flush=True)
+    finally:
+        job["finished"] = time.time()
+
+
+@app.post("/api/clean")
+def start_clean():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not VC.available():
+        return jsonify(error="Le moteur de nettoyage n'est pas encore installé sur le serveur."), 500
+    cleanup()
+    if any(j["platform"] == "clean" and not j.get("finished") for j in JOBS.values()):
+        return jsonify(error="Un nettoyage est déjà en cours. Attends qu'il se termine (ou annule-le)."), 409
+    jid = uuid.uuid4().hex[:12]
+    d = os.path.join(BASE, "n_" + jid)
+    os.makedirs(d, exist_ok=True)
+    f = request.files.get("file")
+    url = (request.form.get("url") or "").strip()
+    src = None
+    if f and f.filename:
+        ext = os.path.splitext(f.filename)[1][:10].lower() or ".bin"
+        src = os.path.join(d, "src" + ext)
+        f.save(src)
+        name = os.path.splitext(os.path.basename(f.filename))[0][:120]
+    elif re.match(r"https?://", url):
+        name = url
+    else:
+        shutil.rmtree(d, ignore_errors=True)
+        return jsonify(error="Choisis un fichier audio ou vidéo, ou colle un lien."), 400
+    try:
+        strength = max(10, min(100, int(request.form.get("strength") or 100)))
+    except ValueError:
+        strength = 100
+    site = "youtube" if re.search(r"youtu\.?be", url) else "tiktok" if "tiktok" in url else \
+        "facebook" if re.search(r"facebook|fb\.watch", url) else "other"
+    job = {"id": jid, "platform": "clean", "source": name, "source_name": name, "url": url, "site": site,
+           "limit": 0, "sort": "", "lang": "", "phase": "queued", "items": [], "error": "", "created": time.time(),
+           "step": "Préparation…", "pct": 1, "dir": d, "strength": strength,
+           "video": request.form.get("video") != "0"}
+    with LOCK:
+        JOBS[jid] = job
+    threading.Thread(target=run_clean_job, args=(job, src), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+@app.post("/api/job/<jid>/cancel")
+def cancel_job(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if j:
+        j["cancel"] = True
+    return jsonify(ok=True)
+
+
+@app.get("/api/job/<jid>/clean/<kind>")
+def clean_file(jid, kind):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid) or {}
+    path = (j.get("out") or {}).get(kind)
+    if not path or not os.path.exists(path):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance le nettoyage.", 404
+    if request.args.get("dl") != "1":
+        return send_file(path, mimetype="audio/mpeg" if kind == "voice" else "video/mp4", conditional=True, max_age=0)
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path))
+
+
 # ------------------------------------------------ kit de vente (visuels + description)
 import kit as KIT
 
@@ -3576,7 +3709,7 @@ def _keepalive():
     url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kopi-x5eh.onrender.com").rstrip("/") + "/ping"
     while True:
         time.sleep(240)
-        busy = any(j.get("platform") in ("ebook", "kit", "audio") and j.get("phase") in ("queued", "transcribing")
+        busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean") and j.get("phase") in ("queued", "transcribing")
                    for j in list(JOBS.values()))
         if busy:
             try:

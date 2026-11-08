@@ -324,6 +324,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <button role="tab" id="tabAcc" class="on" aria-selected="true" aria-controls="modeAcc" title="Scripts de comptes TikTok et YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg><span>Scripts</span></button>
     <button role="tab" id="tabCl" aria-selected="false" aria-controls="modeCl" title="Clipping de longues vidéos"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg><span>Clipping</span></button>
     <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile" title="Transcrire un fichier audio ou vidéo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M18.5 10.5a6.5 6.5 0 0 1-13 0M12 17v4M8.5 21h7"/></svg><span>Transcrire</span></button>
+    <button role="tab" id="tabNet" aria-selected="false" aria-controls="modeNet" title="Retirer la musique de fond et garder la voix"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 9v6"/><path d="m17.5 5.5 1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/></svg><span>Nettoyer</span></button>
     <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl" title="Télécharger les vidéos TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5M5 20.5h14"/></svg><span>TikTok</span></button>
     <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr" title="Traduire un texte"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.6 3.4 2.8 6 6 7.5M11 5c-.7 3.6-3.2 6.6-6.5 8"/><path d="m12.5 21 4-9 4 9M14 17.5h5"/></svg><span>Traduire</span></button>
     <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd" title="Photos et médias d'un post X ou TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="m21 16-4.5-4.5L7 21"/></svg><span>Photos</span></button>
@@ -677,6 +678,39 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     </section>
   </div>
 
+  <div id="modeNet" role="tabpanel" hidden>
+    <h1>Importe un audio avec musique.<br>Garde <span>seulement la voix</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <label class="drop fdrop" id="nDrop" for="nFile">
+          <input type="file" id="nFile" accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.ogg,.opus,.webm,.mov,.mkv,.aac,.flac">
+          <span class="fic" aria-hidden="true">♫</span>
+          <b id="nName">Choisir un audio ou une vidéo</b>
+          <small>ou glisse-le ici · MP3, M4A, WAV, MP4… jusqu'à 4 heures</small>
+        </label>
+        <label for="nUrl" style="margin-top:14px">Ou colle un lien (YouTube, TikTok, Facebook…)</label>
+        <input id="nUrl" type="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+        <label style="margin-top:14px">Force du nettoyage</label>
+        <div class="seg" id="nStr"><button data-v="100" class="on">Total · voix seule</button><button data-v="30">Doux · un léger fond reste</button></div>
+        <div class="checks"><label class="check"><input type="checkbox" id="nVid" checked>Si c'est une vidéo, rends-moi aussi la vidéo avec la voix propre</label></div>
+        <button class="go" id="nGo">Nettoyer l'audio →</button>
+        <p class="hint">Kopi retire la musique et les bruits (ventilateur, foule, vent…) et garde la parole. Une musique avec des paroles chantées peut laisser un peu de chant. Sur le serveur gratuit, compte environ 2 fois la durée de l'audio (1 h d'audio ≈ 2 h de travail). Tu peux fermer la page : reviens plus tard, le résultat t'attend.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Progression</span>
+        <div class="big"><span id="nPct">0</span><small>%</small></div>
+        <div class="bar" id="nBar"><i id="nFill"></i></div>
+        <div class="state" id="nState"><span class="empty">Importe un fichier ou colle un lien pour lancer le nettoyage.</span></div>
+        <audio id="nPlay" controls preload="none" hidden style="width:100%;margin-top:12px"></audio>
+        <div class="acts">
+          <a class="btn dl" id="nDlV" href="#" aria-disabled="true">Télécharger la voix (MP3)</a>
+          <a class="btn" id="nDlM" href="#" hidden>Télécharger la vidéo propre (MP4)</a>
+          <button class="btn" id="nCancel" hidden>Annuler</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+
   <div id="modeFile" role="tabpanel" hidden>
     <h1>Importe un audio.<br>Récupère <span>le texte complet</span>.</h1>
     <div class="bento">
@@ -807,7 +841,7 @@ function copyText(t,btn,label){
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
 }
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
+const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -1443,6 +1477,56 @@ function fWatch(id){
   tick();fTimer=setInterval(tick,2500);
 }
 try{const j=localStorage.getItem('fileJob');if(j)fWatch(j)}catch(e){}
+/* ---------- nettoyage audio ---------- */
+let nFileObj=null,nTimer=null,nBusy=false,nStrV='100';
+document.querySelectorAll('#nStr button').forEach(b=>b.onclick=()=>{nStrV=b.dataset.v;document.querySelectorAll('#nStr button').forEach(x=>x.classList.toggle('on',x===b))});
+function nPick(f){if(!f)return;nFileObj=f;$('#nName').textContent=f.name+' · '+fmtSize(f.size);$('#nDrop').classList.add('has');$('#nUrl').value=''}
+$('#nFile').onchange=e=>nPick(e.target.files[0]);
+['dragenter','dragover'].forEach(t=>$('#nDrop').addEventListener(t,e=>{e.preventDefault();$('#nDrop').classList.add('over')}));
+['dragleave','drop'].forEach(t=>$('#nDrop').addEventListener(t,e=>{e.preventDefault();$('#nDrop').classList.remove('over')}));
+$('#nDrop').addEventListener('drop',e=>nPick(e.dataTransfer.files[0]));
+$('#nUrl').addEventListener('input',()=>{if($('#nUrl').value.trim()){nFileObj=null;$('#nName').textContent='Choisir un audio ou une vidéo';$('#nDrop').classList.remove('has')}});
+function nProgress(p,live){$('#nPct').textContent=Math.round(p);$('#nFill').style.width=p+'%';$('#nBar').classList.toggle('live',!!live)}
+function nSetBusy(on){nBusy=on;$('#nGo').classList.toggle('busy',on);$('#nGo').textContent=on?'Kopi nettoie…':'Nettoyer l\'audio →';$('#nCancel').hidden=!on}
+function nErr(m){$('#nState').innerHTML=`<div class="err">${esc(m)}</div>`;nSetBusy(false);nProgress(0,false)}
+function nActs(id,outs){const v=outs.includes('voice'),m=outs.includes('video');
+  $('#nDlV').setAttribute('aria-disabled',v?'false':'true');$('#nDlV').href=v?'/api/job/'+id+'/clean/voice?dl=1':'#';
+  $('#nDlM').hidden=!m;if(m)$('#nDlM').href='/api/job/'+id+'/clean/video?dl=1';
+  $('#nPlay').hidden=!v;if(v&&!$('#nPlay').src.includes(id))$('#nPlay').src='/api/job/'+id+'/clean/voice'}
+$('#nGo').onclick=()=>{
+  if(nBusy)return;
+  const url=$('#nUrl').value.trim();
+  if(!nFileObj&&!url){nErr('Choisis un fichier audio ou vidéo, ou colle un lien.');return}
+  if(nFileObj&&nFileObj.size>2*1024**3){nErr('Fichier trop lourd (2 Go maximum). Envoie plutôt l\'audio seul (MP3/M4A).');return}
+  nSetBusy(true);nActs('',[]);$('#nPlay').hidden=true;$('#nPlay').removeAttribute('src');
+  const fd=new FormData();if(nFileObj)fd.append('file',nFileObj);else fd.append('url',url);
+  fd.append('strength',nStrV);fd.append('video',$('#nVid').checked?'1':'0');
+  const x=new XMLHttpRequest();x.open('POST','/api/clean');
+  x.upload.onprogress=e=>{if(e.lengthComputable&&nFileObj){const p=e.loaded/e.total*100;nProgress(p*0.02,true);$('#nState').textContent=`Envoi du fichier · ${Math.round(p)} % (${fmtSize(e.loaded)} / ${fmtSize(e.total)})`}};
+  x.onload=()=>{let d={};try{d=JSON.parse(x.responseText)}catch(e){}
+    if(x.status!==200){nErr(d.error||'Envoi impossible ('+x.status+').');return}
+    try{localStorage.setItem('cleanJob',d.job_id)}catch(e){}
+    nWatch(d.job_id)};
+  x.onerror=()=>nErr('Connexion coupée pendant l\'envoi. Vérifie ta connexion et réessaie.');
+  x.send(fd);
+};
+function nWatch(id){
+  clearInterval(nTimer);nSetBusy(true);
+  $('#nCancel').onclick=async()=>{$('#nCancel').textContent='Annulation…';try{await fetch('/api/job/'+id+'/cancel',{method:'POST'})}catch(e){}};
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(nTimer);nErr((e&&e.error)||'Connexion perdue');try{localStorage.removeItem('cleanJob')}catch(_){}return}
+    if(d.phase==='transcribing'||d.phase==='queued'){nProgress(Math.min(d.pct||1,99),true);$('#nState').textContent=d.step||'Préparation…';return}
+    clearInterval(nTimer);nSetBusy(false);$('#nCancel').textContent='Annuler';
+    if(d.phase==='error'){nErr(d.error);try{localStorage.removeItem('cleanJob')}catch(_){}return}
+    nProgress(100,false);
+    $('#nState').innerHTML=`<b>Terminé ✓</b> · ${esc(d.source_name)}`+(d.duration?` · ${fmtDur(d.duration)} d'audio`:'')+'<br><small>Écoute ci-dessous, puis télécharge.</small>';
+    nActs(id,d.outs||[]);
+  };
+  tick();nTimer=setInterval(tick,4000);
+}
+try{const j=localStorage.getItem('cleanJob');if(j)nWatch(j)}catch(e){}
+
 
 const lim=$('#limit');
 function markChip(v){document.querySelectorAll('#chips button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}

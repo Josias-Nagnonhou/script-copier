@@ -4,6 +4,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
     && rm -rf /var/lib/apt/lists/*
 # Deno : nécessaire à yt-dlp pour lire YouTube
 COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
+# DeepFilterNet : retire la musique et les bruits de fond pour garder la voix (onglet Nettoyer)
+RUN python -c "import urllib.request as u; u.urlretrieve('https://github.com/Rikorose/DeepFilterNet/releases/download/v0.5.6/deep-filter-0.5.6-x86_64-unknown-linux-musl', '/usr/local/bin/deep-filter')" \
+    && chmod 755 /usr/local/bin/deep-filter && /usr/local/bin/deep-filter --version
 
 WORKDIR /app
 COPY requirements.txt .

@@ -726,11 +726,21 @@ def cover_from_upload(path, out):
     return out
 
 
-def pdf_text(path, max_chars=5000):
+def pdf_text(path, max_chars=9000):
+    """Texte du livre : sommaire + début + pages réparties dans tout le livre (plus d'infos pour l'IA)."""
     try:
         from pypdf import PdfReader
         r = PdfReader(path)
-        txt = " ".join((p.extract_text() or "") for p in r.pages[:12])
-        return re.sub(r"\s+", " ", txt)[:max_chars]
+        n = len(r.pages)
+        idx = list(range(min(n, 8)))
+        if n > 8:
+            step = max(1, (n - 8) // 14)
+            idx += list(range(8, n, step))[:14]
+        parts = []
+        for i in idx:
+            t = re.sub(r"\s+", " ", r.pages[i].extract_text() or "").strip()
+            if t:
+                parts.append(t[:900] if i >= 8 else t)
+        return " ".join(parts)[:max_chars]
     except Exception:
         return ""

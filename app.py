@@ -2504,7 +2504,7 @@ def gen_sales_copy(meta, about=""):
     if meta.get("price"):
         facts.append(f"Prix : {meta['price']}")
     if about:
-        facts.append(f"Contenu du livre (extrait ou résumé) : {about[:4000]}")
+        facts.append(f"Contenu du livre (extrait ou résumé) : {about[:7000]}")
     facts = [f for f in facts if f.split(":", 1)[1].strip()]
     system = (
         "Tu écris comme un vrai créateur africain francophone qui présente SON livre à sa communauté : une personne, pas "
@@ -2635,7 +2635,7 @@ def run_kit_job(job, meta, cover_src, about):
     job["dir"] = d
     try:
         job["phase"] = "transcribing"
-        job["step"], job["pct"] = "Préparation de la couverture…", 8
+        job["step"], job["pct"] = ("Préparation de ta couverture…" if meta.get("custom_cover") else "Préparation de la couverture…"), 8
         cover = os.path.join(d, "cover.jpg")
         KIT.cover_from_upload(cover_src, cover)
         pal = meta.get("colors") or KIT.palette_from_image(cover)
@@ -2676,6 +2676,17 @@ def run_kit_job(job, meta, cover_src, about):
         job["phase"], job["error"] = "error", msg[:300]
     finally:
         job["finished"] = time.time()
+
+
+def _save_custom_cover(f):
+    """Couverture personnelle importée en plus de l'ebook → chemin JPEG/PNG, ou erreur."""
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".pdf"):
+        raise ValueError("Ta couverture doit être une image (JPG, PNG, WEBP) ou un PDF d'une page.")
+    up = tempfile.mkdtemp(dir=BASE)
+    pth = os.path.join(up, "macouverture" + ext)
+    f.save(pth)
+    return to_jpeg(pth) if ext == ".heic" else pth
 
 
 @app.post("/api/kit")
@@ -2724,6 +2735,14 @@ def start_kit():
                 meta["page_count"] = len(PdfReader(cover_src).pages)
             except Exception:
                 pass
+    cf = request.files.get("cover")
+    if cf and cf.filename:
+        try:
+            cover_src = _save_custom_cover(cf)
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
+        meta.pop("colors", None)  # les couleurs des visuels suivent ta couverture
+        meta["custom_cover"] = True
     meta.update({k: v for k, v in (("price", price), ("label", label), ("points", points)) if v})
     if not meta.get("label"):
         meta["label"] = "Ebook PDF"

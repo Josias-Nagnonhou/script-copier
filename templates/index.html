@@ -335,14 +335,14 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <h1>Ton ebook est prêt.<br>Crée <span>ce qui le fait vendre</span>.</h1>
     <div class="bento">
       <section class="tile">
-        <div class="seg" id="kSrc"><button data-s="kopi" class="on">Mon ebook Kopi</button><button data-s="up">Importer une couverture</button></div>
+        <div class="seg" id="kSrc"><button data-s="kopi" class="on">Mon ebook Kopi</button><button data-s="up">Importer mon ebook</button></div>
         <div id="kKopi"><p class="kinfo" id="kKopiInfo"></p></div>
         <div id="kUp" hidden>
           <label class="drop fdrop" id="kDrop" for="kFile">
             <input type="file" id="kFile" accept="image/*,.pdf,.heic">
             <span class="fic" aria-hidden="true">▣</span>
-            <b id="kFileName">Choisir la couverture ou le PDF de l'ebook</b>
-            <small>JPG, PNG ou PDF · avec le PDF, l'IA lit aussi le contenu pour la description</small>
+            <b id="kFileName">Choisir le PDF de l'ebook (ou juste sa couverture)</b>
+            <small>Avec le PDF entier, l'IA lit tout le livre : description plus précise et pages intérieures dans les visuels</small>
           </label>
           <div class="grid">
             <div><label for="kTitle">Titre de l'ebook</label><input id="kTitle" autocomplete="off"></div>
@@ -352,6 +352,16 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           <input id="kSub" autocomplete="off">
           <label for="kAbout" style="margin-top:12px">De quoi parle le livre ? <small class="opt">(facultatif si tu importes le PDF)</small></label>
           <textarea id="kAbout" rows="3" class="ktext" placeholder="Les chapitres, à qui il s'adresse, ce qu'il apporte…"></textarea>
+        </div>
+        <label style="margin-top:14px">Couverture utilisée dans les visuels</label>
+        <div class="seg" id="kCovMode"><button data-c="book" class="on">Celle de l'ebook</button><button data-c="mine">Ma propre couverture</button></div>
+        <div id="kCovBox" hidden>
+          <label class="drop fdrop" id="kCovDrop" for="kCovFile" style="margin-top:10px">
+            <input type="file" id="kCovFile" accept="image/*,.heic,.pdf">
+            <span class="fic" aria-hidden="true">▣</span>
+            <b id="kCovName">Choisir ta couverture (JPG ou PNG)</b>
+            <small>Les visuels montrent ta couverture ; la description et les infos viennent toujours de l'ebook</small>
+          </label>
         </div>
         <div class="grid">
           <div><label for="kPrice">Prix affiché <small class="opt">(facultatif)</small></label><input id="kPrice" autocomplete="off" placeholder="5 000 FCFA"></div>
@@ -1147,7 +1157,7 @@ try{const j=localStorage.getItem('ebJob');if(j)ebWatch(j)}catch(e){}
 let kSrc='kopi',kFileObj=null,kTimer=null,kBusy=false;
 function kUseKopi(){
   let id='',t='';try{id=localStorage.getItem('ebDoneId')||'';t=localStorage.getItem('ebDoneTitle')||''}catch(e){}
-  $('#kKopiInfo').innerHTML=id?`Ebook utilisé : <b>${esc(t)}</b>. Kopi reprend sa couverture, ses couleurs et son contenu.`:'Aucun ebook créé avec Kopi pour l\'instant. Crée-en un dans l\'onglet <b>Monétiser</b>, ou importe une couverture.';
+  $('#kKopiInfo').innerHTML=id?`Ebook utilisé : <b>${esc(t)}</b>. Kopi reprend son contenu, et sa couverture sauf si tu importes la tienne juste en dessous.`:'Aucun ebook créé avec Kopi pour l\'instant. Crée-en un dans l\'onglet <b>Monétiser</b>, ou importe ton ebook.';
   return id;
 }
 function kSetSrc(v){kSrc=v;document.querySelectorAll('#kSrc button').forEach(b=>b.classList.toggle('on',b.dataset.s===v));$('#kKopi').hidden=v!=='kopi';$('#kUp').hidden=v!=='up'}
@@ -1160,15 +1170,24 @@ $('#kFile').onchange=e=>kPick(e.target.files[0]);
 ['dragenter','dragover'].forEach(t=>$('#kDrop').addEventListener(t,e=>{e.preventDefault();$('#kDrop').classList.add('over')}));
 ['dragleave','drop'].forEach(t=>$('#kDrop').addEventListener(t,e=>{e.preventDefault();$('#kDrop').classList.remove('over')}));
 $('#kDrop').addEventListener('drop',e=>kPick(e.dataTransfer.files[0]));
+let kCov='book',kCovObj=null;
+function kSetCov(v){kCov=v;document.querySelectorAll('#kCovMode button').forEach(b=>b.classList.toggle('on',b.dataset.c===v));$('#kCovBox').hidden=v!=='mine'}
+document.querySelectorAll('#kCovMode button').forEach(b=>b.onclick=()=>kSetCov(b.dataset.c));
+function kCovPick(f){if(!f)return;kCovObj=f;$('#kCovName').textContent=f.name;$('#kCovDrop').classList.add('has')}
+$('#kCovFile').onchange=e=>kCovPick(e.target.files[0]);
+['dragenter','dragover'].forEach(t=>$('#kCovDrop').addEventListener(t,e=>{e.preventDefault();$('#kCovDrop').classList.add('over')}));
+['dragleave','drop'].forEach(t=>$('#kCovDrop').addEventListener(t,e=>{e.preventDefault();$('#kCovDrop').classList.remove('over')}));
+$('#kCovDrop').addEventListener('drop',e=>kCovPick(e.dataTransfer.files[0]));
 function kSetBusy(on){kBusy=on;$('#kGo').classList.toggle('busy',on);$('#kGo').textContent=on?'Kopi prépare ton kit…':'Créer le kit de vente →';$('#kBar').classList.toggle('live',on)}
 function kErr(m){$('#kState').innerHTML=`<div class="err">${esc(m)}</div>`;kSetBusy(false)}
 $('#kGo').onclick=async()=>{
   if(kBusy)return;
   const fd=new FormData();
-  if(kSrc==='kopi'){const id=kUseKopi();if(!id){kErr('Crée d\'abord un ebook, ou choisis « Importer une couverture ».');return}fd.append('ebook_job',id)}
+  if(kSrc==='kopi'){const id=kUseKopi();if(!id){kErr('Crée d\'abord un ebook, ou choisis « Importer mon ebook ».');return}fd.append('ebook_job',id)}
   else{if(!kFileObj){kErr('Choisis la couverture ou le PDF de l\'ebook.');return}
     const t=$('#kTitle').value.trim();if(!t){$('#kTitle').focus();return}
     fd.append('file',kFileObj);fd.append('title',t);fd.append('subtitle',$('#kSub').value.trim());fd.append('author',$('#kAuthor').value.trim());fd.append('about',$('#kAbout').value.trim())}
+  if(kCov==='mine'){if(!kCovObj){kErr('Choisis ta couverture, ou sélectionne « Celle de l\'ebook ».');return}fd.append('cover',kCovObj)}
   fd.append('price',$('#kPrice').value.trim());fd.append('label',$('#kLabel').value.trim());fd.append('points',$('#kPoints').value.trim());
   kSetBusy(true);$('#kRes').hidden=true;$('#kZip').setAttribute('aria-disabled','true');$('#kFill').style.width='3%';$('#kPct').textContent='0';$('#kState').textContent='Envoi…';
   try{const r=await fetch('/api/kit',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');

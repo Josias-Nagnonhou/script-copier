@@ -50,14 +50,50 @@ def find_env_key(hint, prefix=None):
 GEMINI_KEY = find_env_key("GEMINI") or find_env_key("GOOGLE") or find_env_key("NANO", "AIza")
 PEXELS_KEY = find_env_key("PEXELS")
 PIXABAY_KEY = find_env_key("PIXABAY")
-CF_ACCOUNT = (find_env_key("CF_ACCOUNT") or find_env_key("CLOUDFLARE_ACCOUNT")).strip()
-CF_TOKEN = (find_env_key("CF_API_TOKEN") or find_env_key("CF_TOKEN") or find_env_key("CLOUDFLARE_API_TOKEN")
-            or find_env_key("CLOUDFLARE_TOKEN")).strip()
+def _cf_env():
+    """Trouve l'Account ID et le jeton Cloudflare quel que soit le nom donné aux variables."""
+    acc = tok = ""
+    items = [(re.sub(r"[^A-Z0-9]", "", k.upper()), (v or "").strip().strip('"').strip("'").strip())
+             for k, v in os.environ.items()]
+    for n, v in items:
+        if not v:
+            continue
+        cf = "CLOUDFLARE" in n or n.startswith("CF") or "WORKERS" in n
+        if cf and ("ACCOUNT" in n or n.endswith("ID") or "COMPTE" in n) and not acc:
+            acc = v
+        elif cf and ("TOKEN" in n or "JETON" in n or "KEY" in n or "CLE" in n) and not tok:
+            tok = v
+    if not acc:  # un Account ID Cloudflare = 32 caractères hexadécimaux
+        for n, v in items:
+            if re.fullmatch(r"[0-9a-f]{32}", v):
+                acc = v; break
+    if not tok:  # le jeton est souvent le seul long texte restant collé près de l'Account ID
+        for n, v in items:
+            if ("CLOUDFLARE" in n or n.startswith("CF")) and v != acc and re.fullmatch(r"[A-Za-z0-9_\-]{35,60}", v):
+                tok = v; break
+    return acc, tok
+
+
+CF_ACCOUNT, CF_TOKEN = _cf_env()
 print("Images : Cloudflare", "oui" if CF_ACCOUNT and CF_TOKEN else "non", "| Google", "oui" if GEMINI_KEY else "non",
       "| Pexels", "oui" if PEXELS_KEY else "non",
       "| Pixabay", "oui" if PIXABAY_KEY else "non", flush=True)
+def _cf_check():
+    if not (CF_ACCOUNT and CF_TOKEN):
+        return
+    try:
+        r = requests.get("https://api.cloudflare.com/client/v4/user/tokens/verify",
+                         headers={"Authorization": f"Bearer {CF_TOKEN}"}, timeout=20)
+        ok = r.status_code == 200 and (r.json().get("result") or {}).get("status") == "active"
+        print("Cloudflare : jeton", "valide" if ok else f"REFUSÉ ({r.status_code})",
+              "| Account ID", "format ok" if re.fullmatch(r"[0-9a-f]{32}", CF_ACCOUNT) else "format inattendu", flush=True)
+    except Exception as e:
+        print("Cloudflare : vérification impossible", e, flush=True)
+
+
+threading.Thread(target=_cf_check, daemon=True).start()
 print("Clé Groq :", "trouvée" if GROQ_KEY else "ABSENTE", "| variables :",
-      sorted(k for k in os.environ if k.isupper() and not k.startswith(("RENDER", "PYTHON", "PATH", "HOME", "LANG", "GPG", "HOSTNAME"))), flush=True)
+      sorted(k for k in os.environ if not k.upper().startswith(("RENDER", "PYTHON", "PATH", "HOME", "LANG", "GPG", "HOSTNAME", "KUBERNETES"))), flush=True)
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "whisper-large-v3-turbo")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
 WORKERS = int(os.environ.get("WORKERS", "1"))  # serveur gratuit : 512 Mo, une vidéo à la fois

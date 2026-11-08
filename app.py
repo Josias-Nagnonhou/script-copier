@@ -58,11 +58,14 @@ def _cf_env():
     for n, v in items:
         if not v:
             continue
-        cf = "CLOUDFLARE" in n or n.startswith("CF") or "WORKERS" in n
+        cf = "CLOUDFLARE" in n or n.startswith("CF") or "WORKERS" in n or n in ("ACCOUNT", "ACCOUNTID", "JETON", "TOKEN", "APITOKEN")
         if cf and ("ACCOUNT" in n or n.endswith("ID") or "COMPTE" in n) and not acc:
             acc = v
         elif cf and ("TOKEN" in n or "JETON" in n or "KEY" in n or "CLE" in n) and not tok:
             tok = v
+    m = re.search(r"[0-9a-f]{32}", acc or "")
+    if m:  # garde seulement l'identifiant si du texte a été collé autour
+        acc = m.group(0)
     if not acc:  # un Account ID Cloudflare = 32 caractères hexadécimaux
         for n, v in items:
             if re.fullmatch(r"[0-9a-f]{32}", v):
@@ -86,7 +89,7 @@ def _cf_check():
                          headers={"Authorization": f"Bearer {CF_TOKEN}"}, timeout=20)
         ok = r.status_code == 200 and (r.json().get("result") or {}).get("status") == "active"
         print("Cloudflare : jeton", "valide" if ok else f"REFUSÉ ({r.status_code})",
-              "| Account ID", "format ok" if re.fullmatch(r"[0-9a-f]{32}", CF_ACCOUNT) else "format inattendu", flush=True)
+              "| Account ID", "format ok" if re.fullmatch(r"[0-9a-f]{32}", CF_ACCOUNT) else f"format inattendu ({len(CF_ACCOUNT)} caractères)", flush=True)
     except Exception as e:
         print("Cloudflare : vérification impossible", e, flush=True)
 

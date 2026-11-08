@@ -86,7 +86,22 @@ print("Images : Cloudflare", "oui" if CF_ACCOUNT and CF_TOKEN else "non", "| Goo
       "| Pexels", "oui" if PEXELS_KEY else "non",
       "| Pixabay", "oui" if PIXABAY_KEY else "non", flush=True)
 def _cf_check():
-    if not (CF_ACCOUNT and CF_TOKEN):
+    global CF_ACCOUNT
+    if not CF_TOKEN:
+        return
+    if not re.fullmatch(r"[0-9a-f]{32}", CF_ACCOUNT or ""):  # mauvais Account ID : on le récupère avec le jeton
+        try:
+            r = requests.get("https://api.cloudflare.com/client/v4/accounts",
+                             headers={"Authorization": f"Bearer {CF_TOKEN}"}, timeout=20)
+            ids = [a.get("id") for a in (r.json().get("result") or []) if a.get("id")]
+            if ids:
+                CF_ACCOUNT = ids[0]
+                print("Cloudflare : Account ID retrouvé automatiquement", flush=True)
+            else:
+                print("Cloudflare : Account ID introuvable avec le jeton", r.status_code, flush=True)
+        except Exception as e:
+            print("Cloudflare : recherche Account ID impossible", type(e).__name__, flush=True)
+    if not CF_ACCOUNT:
         return
     try:
         r = requests.get("https://api.cloudflare.com/client/v4/user/tokens/verify",

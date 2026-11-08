@@ -1354,8 +1354,13 @@ AUDIT_SCHEMA = """{
 }"""
 
 
-def audit_listing(platform, url, limit):
-    opts = ydl_opts(platform, extract_flat="in_playlist", skip_download=True, ignoreerrors=True, playlistend=limit)
+AUDIT_MAX = 3000  # « toutes les vidéos » : plafond de sécurité
+
+
+def audit_listing(platform, url, limit, sort="recent"):
+    # « les plus vues » : on lit toute la liste puis on trie ; « les plus récentes » : les N premières suffisent
+    end = AUDIT_MAX if sort == "popular" else limit
+    opts = ydl_opts(platform, extract_flat="in_playlist", skip_download=True, ignoreerrors=True, playlistend=end)
     with yt_dlp.YoutubeDL(opts) as y:
         info = y.extract_info(url, download=False)
     if not info:
@@ -1365,8 +1370,12 @@ def audit_listing(platform, url, limit):
     entries = flatten(info) if info.get("entries") is not None else [info]
     vids = [{"url": entry_url(e, platform), "title": (e.get("title") or e.get("description") or "").strip(),
              "views": e.get("view_count") or 0, "duration": e.get("duration") or 0} for e in entries]
-    vids = [v for v in vids if v["url"]][:limit]
-    meta = {"name": info.get("channel") or info.get("uploader") or info.get("title") or url,
+    vids = [v for v in vids if v["url"]]
+    total = len(vids)
+    if sort == "popular":
+        vids = sorted(vids, key=lambda v: v["views"], reverse=True)
+    vids = vids[:limit]
+    meta = {"total": info.get("playlist_count") or total, "name": info.get("channel") or info.get("uploader") or info.get("title") or url,
             "followers": info.get("channel_follower_count") or 0,
             "description": (info.get("description") or "").strip()[:700]}
     return meta, vids
@@ -1532,15 +1541,17 @@ PLAT_NAME = {"youtube": "YouTube", "tiktok": "TikTok", "facebook": "Facebook"}
 
 
 def run_audit_job(job):
-    print(f"[analyse {job['id']}] {job['src_platform']} {job['url']} ({job['limit']} vidéos, approfondie={job['deep']})", flush=True)
+    print(f"[analyse {job['id']}] {job['src_platform']} {job['url']} ({'toutes' if job.get('all') else job['limit']} vidéos, tri={job.get('sort')}, approfondie={job['deep']})", flush=True)
     tmp = tempfile.mkdtemp(dir=BASE)
     try:
         job["phase"] = "listing"
-        job["step"], job["pct"] = "Lecture des vidéos de la chaîne…", 5
+        big = job.get("all") or job.get("sort") == "popular" or job["limit"] > 200
+        job["step"], job["pct"] = ("Lecture de toutes les vidéos de la chaîne… (1 à 3 minutes pour une grosse chaîne)"
+                                   if big else "Lecture des vidéos de la chaîne…"), 5
         if job["src_platform"] == "facebook":
             meta, vids = facebook_listing(job)
         else:
-            meta, vids = audit_listing(job["src_platform"], job["url"], job["limit"])
+            meta, vids = audit_listing(job["src_platform"], job["url"], job["limit"], job.get("sort") or "recent")
         if not vids and job["src_platform"] != "facebook":
             raise RuntimeError("Aucune vidéo trouvée sur cette chaîne ou ce compte.")
         job["source_name"] = meta["name"]
@@ -1575,7 +1586,8 @@ def run_audit_job(job):
                         print(f"[analyse {job['id']}] commentaires ignorés : {str(e)[:120]}", flush=True)
         job["step"], job["pct"] = "Analyse de l'audience par l'IA…", 78
         lines = [f"{v['title'][:110]} | {fmt_num(v['views']) + ' vues' if v['views'] else 'vues inconnues'}"
-                 + (f" | {int(v['duration'] // 60)} min" if v["duration"] else "") for v in (by_views if has_views else vids)[:45]]
+                 + (f" | {int(v['duration'] // 60)} min" if v["duration"] else "")
+                 for v in ((by_views if has_views else vids) if job.get("sort") == "popular" else vids)[:80]]
         data = [f"PLATEFORME : {PLAT_NAME.get(job['src_platform'], 'TikTok')}",
                 f"NOM : {meta['name']}",
                 f"ABONNÉS : {fmt_num(meta['followers']) if meta['followers'] else 'inconnu'}",
@@ -1586,7 +1598,9 @@ def run_audit_job(job):
             data.append("\n(Aucune vidéo lisible publiquement : appuie-toi sur la description de la page fournie par le créateur, "
                         "sans inventer de chiffres ni de titres.)")
         else:
-            data.append(f"\nVIDÉOS ({len(lines)} sur {len(vids)} analysées, classées par vues décroissantes) :\n" + "\n".join(lines))
+            order = "les plus vues d'abord" if job.get("sort") == "popular" else "les plus récentes d'abord"
+            data.append(f"\nVIDÉOS ({len(vids)} analysées sur {meta.get('total') or len(vids)} au total ; voici {len(lines)} titres, "
+                        f"{order}) :\n" + "\n".join(lines))
         if scripts:
             data.append("\nDÉBUT DES SCRIPTS DES VIDÉOS LES PLUS VUES :\n" + "\n\n".join(f"« {t[:90]} » : {x}" for t, x in scripts))
         if comments:
@@ -1726,11 +1740,12 @@ def start_audit():
     if any(j["platform"] == "audit" and j["phase"] in ("queued", "listing", "transcribing") for j in JOBS.values()):
         return jsonify(error="Une analyse est déjà en cours. Attends qu'elle se termine."), 409
     try:
-        limit = max(5, min(int(d.get("limit") or 40), 150))
+        limit = AUDIT_MAX if d.get("all") else max(5, min(int(d.get("limit") or 40), AUDIT_MAX))
     except ValueError:
         limit = 40
     job = {"id": uuid.uuid4().hex[:12], "platform": "audit", "src_platform": platform, "source": raw,
            "url": normalize_source(platform, raw, "videos"), "limit": limit, "deep": bool(d.get("deep", True)),
+           "sort": "popular" if d.get("sort") == "popular" else "recent", "all": bool(d.get("all")),
            "lang": (d.get("lang") or "").strip()[:5], "phase": "queued", "items": [], "source_name": raw,
            "links": links, "about": about,
            "error": "", "created": time.time(), "step": "En attente…", "pct": 0}

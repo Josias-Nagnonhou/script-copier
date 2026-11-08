@@ -272,6 +272,8 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .kdview p{margin:0 0 12px}.kdview b{font-weight:800}
 .kdbtns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
 .kdedit summary{cursor:pointer;font-weight:700;font-size:14px;margin:4px 0 8px}
+#aCustom{width:100%;box-sizing:border-box;margin-top:8px;border:2px solid var(--line,#e5e2da);border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;background:var(--card,#fff);color:inherit}
+#aSort{margin-bottom:12px}
 </style>
 </head>
 <body>
@@ -430,9 +432,12 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
         <div class="num">
           <label>Vidéos à analyser</label>
           <div class="chips" id="aChips">
-            <button type="button" data-v="20">20</button><button type="button" data-v="40" class="on">40</button><button type="button" data-v="80">80</button><button type="button" data-v="150">150</button>
+            <button type="button" data-v="all">Toutes</button><button type="button" data-v="20">20</button><button type="button" data-v="40" class="on">40</button><button type="button" data-v="100">100</button><button type="button" data-v="custom">Autre nombre</button>
           </div>
+          <input id="aCustom" type="number" min="5" max="3000" inputmode="numeric" placeholder="Ex. : 250" hidden>
         </div>
+        <label style="margin-top:14px">Quelles vidéos ?</label>
+        <div class="seg" id="aSort"><button data-s="popular" class="on">Les plus vues</button><button data-s="recent">Les plus récentes</button></div>
         <div id="aFb" hidden>
           <label for="aLinks">Liens de tes meilleures vidéos ou reels Facebook <small>(conseillé · un par ligne)</small></label>
           <textarea id="aLinks" rows="4" placeholder="https://www.facebook.com/reel/...&#10;https://www.facebook.com/watch/?v=...&#10;https://fb.watch/..."></textarea>
@@ -923,7 +928,11 @@ let aPlat='youtube',aLimit=40,aTimer=null,aBusy=false,aCur=null;
 document.querySelectorAll('#aPlat button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aPlat button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aPlat=b.dataset.p;
   $('#aSource').placeholder=aPlat==='tiktok'?'@nomducompte ou https://www.tiktok.com/@...':aPlat==='facebook'?'https://www.facebook.com/tapage ou nom de la page':'@nomdelachaine ou https://www.youtube.com/@...';
   $('#aFb').hidden=aPlat!=='facebook';$('#aSrcLab').textContent=aPlat==='facebook'?'Lien ou nom de ta page Facebook':'Lien ou nom de ta chaîne / ton compte'});
-document.querySelectorAll('#aChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aLimit=+b.dataset.v});
+let aSortV='popular';
+document.querySelectorAll('#aChips button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aChips button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  const v=b.dataset.v;$('#aCustom').hidden=v!=='custom';if(v==='custom'){$('#aCustom').focus();aLimit='custom'}else aLimit=v==='all'?'all':+v;
+  $('#aSort').style.opacity=v==='all'?.5:1});
+document.querySelectorAll('#aSort button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aSort button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aSortV=b.dataset.s});
 function aSetBusy(on){aBusy=on;$('#aGo').classList.toggle('busy',on);$('#aGo').textContent=on?'Kopi analyse…':'Analyser mon audience →';$('#aBar').classList.toggle('live',on)}
 function aProg(p){$('#aPct').textContent=Math.round(p);$('#aFill').style.width=p+'%'}
 function aErr(m){$('#aState').innerHTML=`<div class="err">${esc(m)}</div>`;aSetBusy(false)}
@@ -974,7 +983,7 @@ $('#aGo').onclick=async()=>{
   const source=$('#aSource').value.trim(),fb=aPlat==='facebook',links=fb?$('#aLinks').value.trim():'',about=fb?$('#aAbout').value.trim():'';
   if(!source&&!(fb&&(links||about))){$('#aSource').focus();return}
   aSetBusy(true);aProg(0);$('#aDl').setAttribute('aria-disabled','true');
-  try{const r=await fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:aPlat,source,links,about,limit:aLimit,deep:$('#aDeep').checked,lang:''})});
+  try{const r=await fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:aPlat,source,links,about,all:aLimit==='all',limit:aLimit==='all'?3000:aLimit==='custom'?(+$('#aCustom').value||40):aLimit,sort:aSortV,deep:$('#aDeep').checked,lang:''})});
     const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('auJob',d.job_id)}catch(e){}aWatch(d.job_id)}
   catch(e){aErr(e.message)}
 };

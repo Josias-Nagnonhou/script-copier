@@ -63,6 +63,10 @@ def _cf_env():
             acc = v
         elif cf and ("TOKEN" in n or "JETON" in n or "KEY" in n or "CLE" in n) and not tok:
             tok = v
+    if tok and re.search(r"\s", tok):  # commande curl collée en entier : on garde seulement le jeton
+        cands = re.findall(r"Bearer\s+([A-Za-z0-9_\-\.]{20,})", tok) or \
+            sorted(re.findall(r"[A-Za-z0-9_\-]{30,}", tok), key=len, reverse=True)
+        tok = cands[-1] if cands else ""
     m = re.search(r"[0-9a-f]{32}", acc or "")
     if m:  # garde seulement l'identifiant si du texte a été collé autour
         acc = m.group(0)
@@ -91,7 +95,7 @@ def _cf_check():
         print("Cloudflare : jeton", "valide" if ok else f"REFUSÉ ({r.status_code})",
               "| Account ID", "format ok" if re.fullmatch(r"[0-9a-f]{32}", CF_ACCOUNT) else f"format inattendu ({len(CF_ACCOUNT)} caractères)", flush=True)
     except Exception as e:
-        print("Cloudflare : vérification impossible", e, flush=True)
+        print("Cloudflare : vérification impossible", type(e).__name__, flush=True)
 
 
 threading.Thread(target=_cf_check, daemon=True).start()

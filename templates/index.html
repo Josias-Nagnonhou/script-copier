@@ -1165,7 +1165,8 @@ document.querySelectorAll('#kSrc button').forEach(b=>b.onclick=()=>kSetSrc(b.dat
 if(!kUseKopi())kSetSrc('up');
 
 function kPick(f){if(!f)return;kFileObj=f;$('#kFileName').textContent=f.name;$('#kDrop').classList.add('has');
-  if(!$('#kTitle').value)$('#kTitle').value=f.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ')}
+  const n=f.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim();
+  if(!$('#kTitle').value&&/\.pdf$/i.test(f.name)&&!/gemini|generated|image|img|screenshot|capture|scan|whatsapp|photo|\d{5,}/i.test(n))$('#kTitle').value=n}
 $('#kFile').onchange=e=>kPick(e.target.files[0]);
 ['dragenter','dragover'].forEach(t=>$('#kDrop').addEventListener(t,e=>{e.preventDefault();$('#kDrop').classList.add('over')}));
 ['dragleave','drop'].forEach(t=>$('#kDrop').addEventListener(t,e=>{e.preventDefault();$('#kDrop').classList.remove('over')}));

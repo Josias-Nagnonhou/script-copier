@@ -1611,7 +1611,7 @@ def run_audit_job(job):
             "Analyse la niche, l'audience, ses problèmes et ses envies, puis propose des produits digitaux "
             "qu'elle achètera vraiment. Règles : appuie chaque affirmation sur les données fournies (cite des titres, "
             "des extraits ou des commentaires réels dans les champs « preuve » et « pourquoi_ca_marchera ») ; "
-            "n'invente aucun chiffre ni aucun commentaire ; propose entre 5 et 7 produits variés, du plus simple "
+            "n'invente aucun chiffre ni aucun commentaire ; propose entre 7 et 10 produits variés, du plus simple "
             "au plus ambitieux ; donne des prix réalistes pour le pouvoir d'achat de l'audience (FCFA et euros) ; "
             "sois concret, direct et actionnable ; plan de lancement en 5 à 8 étapes ; écris tout en français. "
             "Réponds UNIQUEMENT avec un objet JSON valide qui suit exactement cette structure :\n" + AUDIT_SCHEMA)
@@ -1625,12 +1625,18 @@ def run_audit_job(job):
                              {"role": "user", "content": raw[:12000]}], max_tokens=7000, json_mode=True, tag="analyse")
             report = parse_json_loose(raw)
         report["_sources"] = {"videos": len(vids), "scripts": len(scripts), "commentaires": len(comments)}
+        job["step"], job["pct"] = "Recherche de toutes les idées de produits…", 90
+        try:
+            report["banque_idees"] = gen_idea_bank(report, vids, meta)
+        except Exception as e:
+            print(f"[analyse {job['id']}] banque d'idées ignorée : {str(e)[:150]}", flush=True)
         job["report"] = report
         job["file"] = os.path.join(BASE, job["id"] + ".docx")
         job["filename"] = f"Monetisation_{re.sub(r'[^\w-]+', '_', meta['name'])[:30].strip('_') or 'chaine'}.docx"
         build_audit_docx(job, job["file"])
         job["phase"], job["pct"], job["step"] = "done", 100, "Rapport prêt"
         print(f"[analyse {job['id']}] terminée ({GOOD_MODEL['name']}) : {len(report.get('produits') or [])} produits, "
+              f"{sum(len(t['idees']) for t in report.get('banque_idees') or [])} idées, "
               f"{len(scripts)} scripts, {len(comments)} commentaires", flush=True)
     except Exception as e:
         msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
@@ -1641,6 +1647,88 @@ def run_audit_job(job):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         job["finished"] = time.time()
+
+
+def gen_idea_bank(report, vids, meta):
+    """Deuxième passe : un maximum d'idées de produits, classées par thème, à partir de TOUS les sujets de la chaîne."""
+    titles = [v["title"][:100] for v in vids if v.get("title")][:260]
+    n, a = report.get("niche") or {}, report.get("audience") or {}
+    ctx = [f"CHAÎNE : {meta.get('name')}", f"NICHE : {n.get('principale', '')} ({', '.join(n.get('sous_niches') or [])})",
+           f"AUDIENCE : {a.get('profil', '')} · {a.get('langue_pays', '')} · pouvoir d'achat : {a.get('pouvoir_achat', '')}",
+           "PROBLÈMES : " + " ; ".join(d.get("probleme", "") for d in report.get("douleurs") or []),
+           "ENVIES : " + " ; ".join(d.get("desir", "") for d in report.get("desirs") or []),
+           f"\nTITRES DES VIDÉOS ({len(titles)}) :\n" + "\n".join(titles)]
+    system = ("Tu es un expert francophone des produits digitaux pour l'Afrique francophone et la diaspora. À partir des "
+              "sujets réellement abordés par cette chaîne, trouve le PLUS GRAND NOMBRE possible d'idées de produits à vendre "
+              "à son audience : ebooks surtout, mais aussi guides pratiques, programmes de X jours, checklists, mini-formations, "
+              "packs de modèles, prières/rituels/méthodes selon la niche. Regroupe-les par thème (chaque thème vient des "
+              "vidéos). Vise 8 à 12 thèmes et 5 à 8 idées par thème (50 idées ou plus au total), sans doublons, chacune "
+              "précise et vendable, avec un titre accrocheur et naturel (majuscule au début). Prix réalistes en FCFA. "
+              "Réponds UNIQUEMENT en JSON : {\"themes\": [{\"theme\": \"\", \"pourquoi\": \"1 phrase : ce qui montre "
+              "que l'audience aime ce thème\", \"idees\": [{\"titre\": \"\", \"format\": \"ebook, guide, programme…\", "
+              "\"promesse\": \"résultat concret en 1 phrase\", \"prix_fcfa\": \"\"}]}]}")
+    raw = groq_chat([{"role": "system", "content": system}, {"role": "user", "content": "\n".join(ctx)[:16000]}],
+                    max_tokens=9000, json_mode=True, tag="analyse")
+    themes = (parse_json_loose(raw).get("themes") or [])
+    out = []
+    for t in themes:
+        ids = [i for i in (t.get("idees") or []) if isinstance(i, dict) and i.get("titre")]
+        if ids:
+            out.append({"theme": t.get("theme", ""), "pourquoi": t.get("pourquoi", ""), "idees": ids})
+    return out
+
+
+def build_ideas_docx(report, name, path):
+    """Document Word avec TOUTES les idées de produits (produits détaillés + banque d'idées par thème)."""
+    doc = Document()
+    doc.styles["Normal"].font.name, doc.styles["Normal"].font.size = "Calibri", Pt(11)
+    doc.add_heading(f"Idées de produits — {name}", 0)
+    bank = report.get("banque_idees") or []
+    total = len(report.get("produits") or []) + sum(len(t["idees"]) for t in bank)
+    p = doc.add_paragraph()
+    r_ = p.add_run(f"{total} idées · {datetime.datetime.now().strftime('%d/%m/%Y')}")
+    r_.font.color.rgb, r_.font.size = RGBColor(0x66, 0x66, 0x66), Pt(10)
+    if report.get("produits"):
+        doc.add_heading("Les produits recommandés (détaillés)", 1)
+        for i, pr in enumerate(report["produits"], 1):
+            q = doc.add_paragraph(style="List Number")
+            q.add_run(pr.get("nom", "")).bold = True
+            extra = " · ".join(x for x in (pr.get("format"), pr.get("prix_fcfa")) if x)
+            if extra:
+                q.add_run(f"  ({extra})")
+            if pr.get("promesse"):
+                doc.add_paragraph(pr["promesse"])
+    k = 0
+    for t in bank:
+        doc.add_heading(t["theme"], 1)
+        if t.get("pourquoi"):
+            it = doc.add_paragraph().add_run(t["pourquoi"])
+            it.italic = True
+        for idea in t["idees"]:
+            k += 1
+            q = doc.add_paragraph()
+            q.add_run(f"{k}. {idea.get('titre', '')}").bold = True
+            extra = " · ".join(x for x in (idea.get("format"), idea.get("prix_fcfa")) if x)
+            if extra:
+                q.add_run(f"  ({extra})")
+            if idea.get("promesse"):
+                q.add_run("\n" + idea["promesse"])
+    doc.save(path)
+
+
+@app.post("/api/ideas/docx")
+def ideas_docx():
+    if not authed():
+        return "Non connecté", 401
+    d = request.get_json(force=True, silent=True) or {}
+    rep = d.get("report") or {}
+    if not isinstance(rep, dict) or not (rep.get("produits") or rep.get("banque_idees")):
+        return "Aucune idée à exporter", 400
+    name = (d.get("name") or "ma chaine")[:60]
+    path = os.path.join(tempfile.mkdtemp(dir=BASE), "idees.docx")
+    build_ideas_docx(rep, name, path)
+    safe = re.sub(r"[^\w-]+", "_", name)[:30].strip("_") or "chaine"
+    return send_file(path, as_attachment=True, download_name=f"Idees_produits_{safe}.docx")
 
 
 def build_audit_docx(job, path):
@@ -1707,6 +1795,19 @@ def build_audit_docx(job, path):
             if pr.get("contenu"):
                 doc.add_paragraph().add_run("Contenu :").bold = True
                 bullets(pr["contenu"])
+    if r.get("banque_idees"):
+        h(f"Toutes les idées de produits ({sum(len(t['idees']) for t in r['banque_idees'])})")
+        k = 0
+        for t in r["banque_idees"]:
+            doc.add_heading(t["theme"], 2)
+            for idea in t["idees"]:
+                k += 1
+                p = doc.add_paragraph()
+                p.add_run(f"{k}. {idea.get('titre', '')}").bold = True
+                if idea.get("promesse"):
+                    p.add_run(f" — {idea['promesse']}")
+                if idea.get("prix_fcfa"):
+                    p.add_run(f" ({idea['prix_fcfa']})")
     if r.get("plan_lancement"):
         h("Plan de lancement")
         for i, st in enumerate(r["plan_lancement"], 1):

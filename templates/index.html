@@ -284,6 +284,12 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .ibl li{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line,#eee)}
 .ibl li small{display:block;opacity:.6;font-size:12px;margin-top:2px}.ibl li p{margin:4px 0 0;font-size:13.5px;opacity:.85}
 .ibl .ibk{white-space:nowrap;flex-shrink:0}
+.ebaudio{margin-top:16px;padding:14px 16px;border:1px solid var(--line,#e5e2da);border-radius:16px;background:var(--card,#fff)}
+.ebaudio>b{display:block;font-size:15px}.ebaudio>small{display:block;opacity:.65;font-size:12.5px;margin:2px 0 10px}
+.eba-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.eba-row select{border:2px solid var(--line,#e5e2da);border-radius:12px;padding:9px 10px;font:inherit;font-size:14px;background:var(--card,#fff);color:inherit}
+.eba-prog{margin-top:10px}.eba-prog span{display:block;font-size:13px;margin-top:6px}
+#ebAudioPlayer{width:100%;margin:10px 0 4px}
 </style>
 </head>
 <body>
@@ -537,6 +543,17 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           <ol id="ebToc" class="ebtoc"></ol>
           <div class="ebacts"><a class="btn dl" id="ebPdf" href="#">Télécharger le PDF</a><a class="btn" id="ebDocx" href="#">Word modifiable</a></div>
           <button type="button" class="btn ebk" id="ebKit" style="margin-top:10px">Créer les visuels et la description de vente →</button>
+          <div class="ebaudio" id="ebAudio">
+            <b>Version audio du livre</b><small>Gratuite · voix française naturelle · un MP3 complet et un MP3 par chapitre</small>
+            <div class="eba-row">
+              <select id="ebVoice" aria-label="Voix"><option value="henri">Voix d'homme · Henri</option><option value="denise">Voix de femme · Denise</option><option value="remy">Voix d'homme · Rémy</option><option value="vivienne">Voix de femme · Vivienne</option></select>
+              <select id="ebSpeed" aria-label="Vitesse"><option value="lent">Lent</option><option value="normal" selected>Normal</option><option value="rapide">Rapide</option></select>
+              <button type="button" class="btn dl" id="ebAudioGo">Créer la version audio</button>
+            </div>
+            <div class="eba-prog" id="ebAudioProg" hidden><div class="bar live"><i id="ebAudioFill"></i></div><span id="ebAudioState">Préparation…</span></div>
+            <div id="ebAudioDone" hidden><audio id="ebAudioPlayer" controls preload="none"></audio>
+              <div class="ebacts"><a class="btn dl" id="ebAudioFull" href="#">Télécharger le MP3 complet</a><a class="btn" id="ebAudioZip" href="#">MP3 par chapitre (ZIP)</a></div></div>
+          </div>
           <p class="hint">Relis-le avant de le vendre : vérifie les références (versets, chiffres) et ajoute ta touche personnelle dans la version Word.</p>
         </div>
       </div>
@@ -1119,6 +1136,7 @@ function ebWatch(id){
     $('#ebPdf').href='/api/job/'+id+'/ebook/pdf';$('#ebDocx').href='/api/job/'+id+'/ebook/docx';
     try{localStorage.setItem('ebDoneId',id);localStorage.setItem('ebDoneTitle',info.title||'')}catch(e){}
     $('#ebKit').onclick=()=>{kUseKopi();kSetSrc('kopi');setMode('kit');window.scrollTo({top:0,behavior:'smooth'})};
+    $('#ebAudioGo').onclick=()=>ebAudioStart(id);
   };
   tick();ebTimer=setInterval(tick,3000);
 }
@@ -1222,6 +1240,24 @@ async function ebDraft(url,save,btn){
     setTimeout(()=>URL.revokeObjectURL(u),60000);btn.textContent='PDF téléchargé ✓';setTimeout(()=>{btn.textContent=lab},2500);
   }catch(e){btn.textContent=e.message;setTimeout(()=>{btn.textContent=lab},4000)}
   finally{btn.disabled=false}
+}
+let ebAudioTimer=null;
+async function ebAudioStart(ebId){
+  const go=$('#ebAudioGo');go.disabled=true;$('#ebAudioDone').hidden=true;$('#ebAudioProg').hidden=false;$('#ebAudioState').textContent='Envoi…';$('#ebAudioFill').style.width='2%';
+  let saved={};try{saved=JSON.parse(localStorage.getItem('ebSave')||'{}')}catch(e){}
+  try{const r=await fetch('/api/audiobook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ebook_job:ebId,st:saved.st,ctx:saved.ctx,voice:$('#ebVoice').value,speed:$('#ebSpeed').value})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('ebAudioJob',d.job_id)}catch(e){}ebAudioWatch(d.job_id)}
+  catch(e){$('#ebAudioState').innerHTML=`<span class="err">${esc(e.message)}</span>`;go.disabled=false}
+}
+function ebAudioWatch(id){
+  clearInterval(ebAudioTimer);$('#ebAudioProg').hidden=false;$('#ebAudioGo').disabled=true;
+  const tick=async()=>{let d;try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}catch(e){clearInterval(ebAudioTimer);$('#ebAudioGo').disabled=false;return}
+    $('#ebAudioFill').style.width=Math.max(3,d.pct||0)+'%';$('#ebAudioState').textContent=d.step||'…';
+    if(d.phase==='error'){clearInterval(ebAudioTimer);$('#ebAudioState').innerHTML=`<span class="err">${esc(d.error||'Erreur')}</span>`;$('#ebAudioGo').disabled=false;return}
+    if(d.phase!=='done')return;
+    clearInterval(ebAudioTimer);$('#ebAudioProg').hidden=true;$('#ebAudioGo').disabled=false;$('#ebAudioGo').textContent='Refaire avec une autre voix';
+    $('#ebAudioPlayer').src='/api/job/'+id+'/audio/full';$('#ebAudioFull').href='/api/job/'+id+'/audio/full?dl=1';$('#ebAudioZip').href='/api/job/'+id+'/audio/zip';$('#ebAudioDone').hidden=false};
+  tick();ebAudioTimer=setInterval(tick,4000);
 }
 function ebSavedOk(){try{const x=JSON.parse(localStorage.getItem('ebSave')||'null');return !!(x&&x.st&&x.st.plan)}catch(e){return false}}
 function ebOfferRestore(){

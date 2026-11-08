@@ -2251,6 +2251,149 @@ def job_ebook_file(jid, kind):
     return send_file(j[key], as_attachment=True, download_name=f"{j['safe']}.{kind}")
 
 
+# ------------------------------------------------ livre audio (voix naturelles gratuites Edge TTS)
+VOICES = {"henri": "fr-FR-HenriNeural", "denise": "fr-FR-DeniseNeural",
+          "remy": "fr-FR-RemyMultilingualNeural", "vivienne": "fr-FR-VivienneMultilingualNeural"}
+
+
+def speech_text(md):
+    """Markdown du livre → texte à lire à voix haute (sans symboles)."""
+    out = []
+    for line in (md or "").split("\n"):
+        l = line.strip()
+        if not l or l.startswith(":::") and len(l) <= 4:
+            continue
+        m = re.match(r"^:::\s*\w+\s*(.*)$", l)
+        if m:
+            l = m.group(1).strip()
+            if not l:
+                continue
+            l += "."
+        l = re.sub(r"^#{1,6}\s*", "", l)
+        l = re.sub(r"^[-*•]\s+|^\d+[.)]\s+|^- \[ \]\s*|^>\s*", "", l)
+        l = re.sub(r"\*\*(.+?)\*\*|__(.+?)__|\*(.+?)\*", lambda x: next(g for g in x.groups() if g), l)
+        l = l.replace("`", "").replace("|", ", ")
+        if l and l[-1] not in ".!?:;…»":
+            l += "."
+        out.append(l)
+    return "\n".join(out)
+
+
+def audio_sections(st, ctx):
+    plan = st.get("plan") or {}
+    secs = []
+    title = plan.get("titre") or ctx.get("title") or "Ebook"
+    intro = f"{title}. " + (f"{plan.get('sous_titre')}. " if plan.get("sous_titre") else "") + \
+        (f"Un livre de {ctx.get('author')}. " if ctx.get("author") else "")
+    if st.get("intro"):
+        secs.append(("00_Introduction", intro + "\n\nIntroduction.\n" + speech_text(st["intro"])))
+    for k, c in enumerate(plan.get("chapitres") or [], 1):
+        txt = c.get("texte") or "\n\n".join(c.get("parts") or [])
+        if txt.strip():
+            secs.append((f"{k:02d}_Chapitre_{k}", f"Chapitre {k}. {c.get('titre', '')}.\n\n" + speech_text(txt)))
+    if st.get("bonus"):
+        secs.append(("90_Bonus", f"Bonus. {(plan.get('bonus') or {}).get('titre', '')}.\n\n" + speech_text(st["bonus"])))
+    if st.get("concl"):
+        secs.append(("99_Conclusion", "Conclusion.\n\n" + speech_text(st["concl"])))
+    return title, secs
+
+
+def tts_to_file(text, voice, path, rate="+0%"):
+    import asyncio
+    import edge_tts
+
+    async def go():
+        c = edge_tts.Communicate(text, voice, rate=rate)
+        await c.save(path)
+    for attempt in range(4):
+        try:
+            asyncio.run(go())
+            if os.path.exists(path) and os.path.getsize(path) > 1000:
+                return
+        except Exception as e:
+            last = e
+            time.sleep(4 + attempt * 6)
+    raise RuntimeError(f"La voix n'a pas pu être générée ({str(last)[:120] if 'last' in dir() else 'réponse vide'}).")
+
+
+def run_audio_job(job, st, ctx):
+    d = tempfile.mkdtemp(dir=BASE)
+    job["dir"], job["phase"] = d, "transcribing"
+    try:
+        title, secs = audio_sections(st, ctx)
+        if not secs:
+            raise RuntimeError("Rien à lire : le livre ne contient pas encore de texte.")
+        voice = VOICES.get(job["voice"], VOICES["henri"])
+        safe = re.sub(r"[^\w-]+", "_", title)[:50].strip("_") or "ebook"
+        files = []
+        total = sum(len(t) for _, t in secs)
+        done = 0
+        print(f"[audio {job['id']}] « {title} » · {len(secs)} parties · {total} caractères · {voice}", flush=True)
+        for k, (name, txt) in enumerate(secs, 1):
+            job["step"] = f"Lecture à voix haute · partie {k}/{len(secs)}"
+            p = os.path.join(d, f"{name}.mp3")
+            tts_to_file(txt, voice, p, job.get("rate") or "+0%")
+            files.append(p)
+            done += len(txt)
+            job["pct"] = int(5 + 85 * done / total)
+        job["step"], job["pct"] = "Assemblage du livre audio complet…", 92
+        lst = os.path.join(d, "liste.txt")
+        with open(lst, "w") as f:
+            f.write("".join(f"file '{p}'\n" for p in files))
+        full = os.path.join(d, f"{safe}_livre_audio.mp3")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", full],
+                       check=True, timeout=600)
+        zp = os.path.join(d, f"{safe}_livre_audio_par_chapitre.zip")
+        with zipfile.ZipFile(zp, "w", zipfile.ZIP_STORED) as z:
+            for p in files:
+                z.write(p, f"{safe}_{os.path.basename(p)}")
+        dur = probe_duration(full) or 0
+        job.update(audio={"full": full, "zip": zp, "parts": files}, duration=dur, safe=safe)
+        job["phase"], job["pct"], job["step"] = "done", 100, "Livre audio prêt"
+        print(f"[audio {job['id']}] terminé : {int(dur // 60)} min, {os.path.getsize(full) // 1024} Ko", flush=True)
+    except Exception as e:
+        print(f"[audio {job['id']}] erreur : {str(e)[:200]}", flush=True)
+        job["phase"], job["error"] = "error", str(e)[:300]
+    finally:
+        job["finished"] = time.time()
+
+
+@app.post("/api/audiobook")
+def start_audiobook():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    d = request.get_json(force=True, silent=True) or {}
+    st, ctx = d.get("st"), d.get("ctx") or {}
+    ej = JOBS.get(d.get("ebook_job") or "")
+    if ej and (ej.get("st") or {}).get("plan"):
+        st, ctx = ej["st"], ej.get("ctx") or {}
+    if not isinstance(st, dict) or not isinstance(st.get("plan"), dict):
+        return jsonify(error="Livre introuvable : recrée l'ebook ou recharge la page."), 400
+    job = {"id": uuid.uuid4().hex[:12], "platform": "audio", "source": (st["plan"].get("titre") or "Ebook"), "url": "",
+           "source_name": (st["plan"].get("titre") or "Ebook"),
+           "limit": 0, "sort": "", "lang": "", "phase": "queued", "items": [], "error": "", "created": time.time(),
+           "step": "Préparation de la lecture…", "pct": 2, "voice": d.get("voice") or "henri",
+           "rate": {"lent": "-10%", "normal": "+0%", "rapide": "+10%"}.get(d.get("speed") or "normal", "+0%")}
+    with LOCK:
+        JOBS[job["id"]] = job
+    threading.Thread(target=run_audio_job, args=(job, st, ctx), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.get("/api/job/<jid>/audio/<kind>")
+def job_audio_file(jid, kind):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    au = (j or {}).get("audio") or {}
+    path = au.get(kind) if kind in ("full", "zip") else None
+    if not path or not os.path.exists(path):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance la version audio.", 404
+    if kind == "full" and request.args.get("dl") != "1":
+        return send_file(path, mimetype="audio/mpeg", conditional=True, max_age=0)
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path))
+
+
 # ------------------------------------------------ kit de vente (visuels + description)
 import kit as KIT
 
@@ -3294,7 +3437,7 @@ def _keepalive():
     url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kopi-x5eh.onrender.com").rstrip("/") + "/ping"
     while True:
         time.sleep(240)
-        busy = any(j.get("platform") in ("ebook", "kit") and j.get("phase") in ("queued", "transcribing")
+        busy = any(j.get("platform") in ("ebook", "kit", "audio") and j.get("phase") in ("queued", "transcribing")
                    for j in list(JOBS.values()))
         if busy:
             try:

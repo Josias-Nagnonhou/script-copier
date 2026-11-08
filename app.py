@@ -2531,7 +2531,10 @@ def gen_sales_copy(meta, about=""):
         "- Honnêteté : pas de faux avis, pas de chiffres ou de résultats inventés, pas de garantie, pas de fausse urgence, "
         "pas de remboursement promis. Tu n'inventes aucun contenu du livre : tu t'appuies sur les chapitres fournis.")
     user = ("Écris la description de vente de cet ebook.\n" + "\n".join(facts) + "\n\n"
-            "Réponds UNIQUEMENT en JSON : {\"titre_produit\": \"titre de la fiche produit, naturel et accrocheur (max 80 "
+            "Réponds UNIQUEMENT en JSON : {\"titre_exact\": \"le titre fourni, mot pour mot, en remettant seulement les "
+            "accents français oubliés (à, â, é, è, ê, ç, î, ô, û…), les apostrophes et la ponctuation correcte ; ne change, "
+            "n'ajoute et n'enlève AUCUN mot ; garde ses majuscules\", \"sous_titre_exact\": \"pareil pour le sous-titre "
+            "(vide s'il n'y en a pas)\", \"titre_produit\": \"titre de la fiche produit, naturel et accrocheur (max 80 "
             "caractères)\", \"accroche\": \"1 phrase pour les réseaux sociaux, qui sonne humain (max 95 caractères)\", "
             "\"points_forts\": [\"3 bénéfices très courts (max 42 caractères chacun) pour le visuel\"], "
             "\"description\": \"entre 600 et 850 mots, paragraphes de 1 à 3 phrases séparés par une ligne vide. "
@@ -2558,6 +2561,22 @@ def gen_sales_copy(meta, about=""):
         out[k] = cap_first(out.get(k) or "")
     out["points_forts"] = [cap_first(p) for p in out["points_forts"]]
     return out
+
+
+def _bare(s):
+    import unicodedata
+    s = unicodedata.normalize("NFD", s or "")
+    return re.sub(r"[^a-z0-9]", "", "".join(c for c in s if unicodedata.category(c) != "Mn").lower())
+
+
+def accent_fix(orig, fixed):
+    """Reprend la version corrigée (accents, apostrophes) seulement si les mots n'ont pas changé."""
+    fixed = re.sub(r"\s+", " ", (fixed or "")).strip()
+    if not orig or not fixed or _bare(orig) != _bare(fixed):
+        return orig
+    if orig == orig.upper() and fixed != fixed.upper():
+        fixed = fixed.upper()
+    return fixed
 
 
 def cap_first(s):
@@ -2648,6 +2667,14 @@ def run_kit_job(job, meta, cover_src, about):
             except Exception as e:
                 print(f"[kit {job['id']}] description impossible : {str(e)[:160]}", flush=True)
                 job["copy_error"] = "La description n'a pas pu être écrite (limite Groq ?). Relance dans quelques minutes."
+        if copy:
+            t2 = accent_fix(meta.get("title") or "", copy.get("titre_exact"))
+            if t2 != meta.get("title"):
+                print(f"[kit {job['id']}] titre corrigé : « {t2} »", flush=True)
+                meta["title"] = t2
+                job["source_name"] = t2
+            if meta.get("subtitle"):
+                meta["subtitle"] = accent_fix(meta["subtitle"], copy.get("sous_titre_exact"))
         points = [p for p in (meta.get("points") or []) if p][:3] or copy.get("points_forts") or \
             [b[:48] for b in (meta.get("benefits") or [])][:3]
         safe = re.sub(r"[^\w-]+", "_", meta.get("title") or "ebook")[:40].strip("_") or "ebook"

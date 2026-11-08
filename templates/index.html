@@ -515,11 +515,12 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           </div>
           <label for="ebChapImg" style="margin-top:12px">Images des chapitres</label>
           <select id="ebChapImg">
-            <option value="web" selected>Vraies photos d'Internet sous licence libre (gratuit)</option>
+            <option value="ia" {{ 'selected' if cf else 'disabled' }}>Illustrations IA sur mesure (gratuit{{ '' if cf else ', clé Cloudflare à ajouter' }})</option>
+            <option value="web" {{ '' if cf else 'selected' }}>Vraies photos d'Internet sous licence libre (gratuit)</option>
             <option value="photo" {{ '' if pexels else 'disabled' }}>Photos de banque d'images Pixabay (gratuit{{ '' if pexels else ', clé à ajouter' }})</option>
             <option value="google" {{ '' if gemini else 'disabled' }}>IA Google sur mesure (≈ 0,03 $ par image)</option>
           </select>
-          <p class="hint">Les vraies photos viennent de Wikimedia, Flickr et d'autres sites dont les auteurs autorisent l'usage commercial. Kopi crédite chaque auteur en fin de livre. Pas de photos de célébrités : des scènes, des lieux et des objets réels.</p>
+          <p class="hint">Avec les illustrations IA, Kopi illustre la couverture, chaque ouverture de chapitre et 1 à 2 passages par chapitre. Les vraies photos viennent de Wikimedia, Flickr et d'autres sites dont les auteurs autorisent l'usage commercial. Kopi crédite chaque auteur en fin de livre. Pas de photos de célébrités : des scènes, des lieux et des objets réels.</p>
         </div>
       </div>
       <button class="go" id="ebGo">Créer l'ebook →</button>
@@ -1130,7 +1131,7 @@ function ebWatch(id){
     $('#ebProg').hidden=true;$('#ebDone').hidden=false;
     $('#ebCover').src='/api/job/'+id+'/ebook/cover';
     $('#ebDoneTitle').textContent=info.title||'';
-    const src=info.img_sources||{},parts=[];if(src.google)parts.push(src.google>1?`${src.google} images IA Google`:'couverture IA Google');if(src.pexels)parts.push(`${src.pexels} photo${src.pexels>1?'s':''} Pexels`);if(src.pixabay)parts.push(`${src.pixabay} photo${src.pixabay>1?'s':''} Pixabay`);if(src.web)parts.push(`${src.web} vraie${src.web>1?'s':''} photo${src.web>1?'s':''} d'Internet`);if(src.libre)parts.push(`${src.libre} image${src.libre>1?'s':''} IA gratuite${src.libre>1?'s':''}`);
+    const src=info.img_sources||{},parts=[];if(src.google)parts.push(src.google>1?`${src.google} images IA Google`:'couverture IA Google');if(src.ia)parts.push(`${src.ia} illustration${src.ia>1?'s':''} IA`);if(src.pexels)parts.push(`${src.pexels} photo${src.pexels>1?'s':''} Pexels`);if(src.pixabay)parts.push(`${src.pixabay} photo${src.pixabay>1?'s':''} Pixabay`);if(src.web)parts.push(`${src.web} vraie${src.web>1?'s':''} photo${src.web>1?'s':''} d'Internet`);if(src.libre)parts.push(`${src.libre} image${src.libre>1?'s':''} IA gratuite${src.libre>1?'s':''}`);
     $('#ebDoneMeta').textContent=`${info.pages||'?'} pages · ${(info.toc||[]).length} chapitres`+(info.univers?` · univers ${info.univers}`:'')+(info.images?(parts.length?' · '+parts.join(', '):' · sans images (services indisponibles)'):'');
     $('#ebToc').innerHTML=(info.toc||[]).map(t=>`<li>${esc(t)}</li>`).join('');
     $('#ebPdf').href='/api/job/'+id+'/ebook/pdf';$('#ebDocx').href='/api/job/'+id+'/ebook/docx';

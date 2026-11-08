@@ -50,7 +50,11 @@ def find_env_key(hint, prefix=None):
 GEMINI_KEY = find_env_key("GEMINI") or find_env_key("GOOGLE") or find_env_key("NANO", "AIza")
 PEXELS_KEY = find_env_key("PEXELS")
 PIXABAY_KEY = find_env_key("PIXABAY")
-print("Images : Google", "oui" if GEMINI_KEY else "non", "| Pexels", "oui" if PEXELS_KEY else "non",
+CF_ACCOUNT = (find_env_key("CF_ACCOUNT") or find_env_key("CLOUDFLARE_ACCOUNT")).strip()
+CF_TOKEN = (find_env_key("CF_API_TOKEN") or find_env_key("CF_TOKEN") or find_env_key("CLOUDFLARE_API_TOKEN")
+            or find_env_key("CLOUDFLARE_TOKEN")).strip()
+print("Images : Cloudflare", "oui" if CF_ACCOUNT and CF_TOKEN else "non", "| Google", "oui" if GEMINI_KEY else "non",
+      "| Pexels", "oui" if PEXELS_KEY else "non",
       "| Pixabay", "oui" if PIXABAY_KEY else "non", flush=True)
 print("Clé Groq :", "trouvée" if GROQ_KEY else "ABSENTE", "| variables :",
       sorted(k for k in os.environ if k.isupper() and not k.startswith(("RENDER", "PYTHON", "PATH", "HOME", "LANG", "GPG", "HOSTNAME"))), flush=True)
@@ -463,7 +467,7 @@ def login():
 def index():
     if not authed():
         return redirect("/login")
-    return render_template("index.html", groq=bool(GROQ_KEY), yt=YT["status"], yt_src=YT["source"],
+    return render_template("index.html", groq=bool(GROQ_KEY), cf=bool(CF_ACCOUNT and CF_TOKEN), yt=YT["status"], yt_src=YT["source"],
                            gemini=bool(GEMINI_KEY), pexels=bool(PEXELS_KEY or PIXABAY_KEY))
 
 
@@ -2002,12 +2006,14 @@ def run_ebook_job(job, ctx):
         cw, chh = EB.cover_size(uni)
         imgs_ok = 0
         credits, used = [], set()
-        src_count = {"google": 0, "pexels": 0, "pixabay": 0, "web": 0, "libre": 0}
+        src_count = {"google": 0, "ia": 0, "pexels": 0, "pixabay": 0, "web": 0, "libre": 0}
         if job["images"]:
             job["step"] = "Création de la couverture…"
             cprompt = plan.get("cover_prompt") or ctx["title"]
             if GEMINI_KEY and EB.fetch_gemini(cprompt, cw, chh, cover, GEMINI_KEY, log=print, uni=uni):
                 src_count["google"] += 1
+            elif EB.fetch_cloudflare(cprompt, cw, chh, cover, CF_ACCOUNT, CF_TOKEN, log=print, uni=uni, seed=seed):
+                src_count["ia"] += 1
             elif EB.fetch_image(cprompt, cw, chh, seed, cover, log=print, uni=uni):
                 src_count["libre"] += 1
             elif PIXABAY_KEY and (cr := EB.fetch_pixabay(chs[0].get("photo_query") or ctx["title"], cover, PIXABAY_KEY, used,
@@ -2025,6 +2031,10 @@ def run_ebook_job(job, ctx):
                 if job.get("chapter_images") == "google" and GEMINI_KEY:
                     if EB.fetch_gemini(c.get("image_prompt") or c["titre"], 1280, ih, pth, GEMINI_KEY, log=print, uni=uni, size="1K"):
                         src_count["google"] += 1; ok = True
+                if not ok and job.get("chapter_images") in ("ia", "google") and \
+                        EB.fetch_cloudflare(c.get("image_prompt") or c["titre"], 1280, ih, pth, CF_ACCOUNT, CF_TOKEN,
+                                            log=print, uni=uni, seed=seed + k + 1):
+                    src_count["ia"] += 1; ok = True
                 order = ["web", "pixabay", "pexels"] if job.get("chapter_images") == "web" else ["pixabay", "pexels", "web"]
                 for prov in order:
                     if ok:
@@ -2038,11 +2048,34 @@ def run_ebook_job(job, ctx):
                         cr = EB.fetch_pexels(q, pth, PEXELS_KEY, used, log=print)
                     if cr:
                         credits.append(cr); src_count[{"web": "web"}.get(prov, prov)] += 1; ok = True
+                if not ok and EB.fetch_cloudflare(c.get("image_prompt") or c["titre"], 1280, ih, pth, CF_ACCOUNT, CF_TOKEN,
+                                                  log=print, uni=uni, seed=seed + k + 1):
+                    src_count["ia"] += 1; ok = True
                 if not ok and job.get("chapter_images") != "google" and \
                         EB.fetch_image(c.get("image_prompt") or c["titre"], 1280, ih, seed + k + 1, pth, log=print, uni=uni):
                     src_count["libre"] += 1; ok = True
                 c["img"] = pth if ok else None  # pas de visuel de remplissage : ouverture sobre sans image
                 tick(f"Image {k + 1} prête")
+            if CF_ACCOUNT and CF_TOKEN and not EB._down("cloudflare"):
+                job["step"] = "Choix des illustrations du texte…"
+                try:
+                    per = 2 if len(chs) <= 12 else 1
+                    ips = EB.gen_inline_prompts(chat, plan, chs, per)
+                except Exception as e:
+                    print(f"[ebook {job['id']}] illustrations du texte ignorées : {str(e)[:120]}", flush=True)
+                    ips = {}
+                n_tot, n_done = sum(len(v) for v in ips.values()), 0
+                for k, c in enumerate(chs, 1):
+                    c["inline"] = []
+                    for j, it in enumerate(ips.get(k) or []):
+                        if EB._down("cloudflare"):
+                            break
+                        n_done += 1
+                        job["step"] = f"Illustrations du texte · {n_done}/{n_tot}"
+                        pth = os.path.join(d, f"ch{k}_in{j + 1}.jpg")
+                        if EB.fetch_cloudflare(it["prompt"], 1280, 720, pth, CF_ACCOUNT, CF_TOKEN, log=print, uni=uni,
+                                               seed=seed + 100 * k + j):
+                            c["inline"].append({"partie": it["partie"], "img": pth}); src_count["ia"] += 1
         else:
             EB.make_art(pal, cover, cw, chh, seed)
         imgs_ok = sum(src_count.values())
@@ -2138,7 +2171,8 @@ def start_ebook():
     job = {"id": uuid.uuid4().hex[:12], "platform": "ebook", "source": title, "url": "", "limit": 0, "sort": "",
            "lang": "", "phase": "queued", "items": [], "source_name": title, "error": "", "created": time.time(),
            "pages": pages, "images": bool(d.get("images", True)), "step": "En attente…", "pct": 0,
-           "chapter_images": d.get("chapter_images") if d.get("chapter_images") in ("google", "web", "photo") else "web"}
+           "chapter_images": d.get("chapter_images") if d.get("chapter_images") in ("google", "web", "photo", "ia")
+           else ("ia" if CF_ACCOUNT and CF_TOKEN else "web")}
     job["ctx"] = ctx
     with LOCK:
         JOBS[job["id"]] = job
@@ -2177,7 +2211,8 @@ def ebook_restore():
     job = {"id": uuid.uuid4().hex[:12], "platform": "ebook", "source": ctx["title"], "url": "", "limit": 0, "sort": "",
            "lang": "", "phase": "queued", "items": [], "source_name": ctx["title"], "error": "", "created": time.time(),
            "pages": max(5, int(d.get("pages") or 30)), "images": bool(d.get("images", True)), "step": "Reprise…", "pct": 0,
-           "chapter_images": d.get("chapter_images") if d.get("chapter_images") in ("google", "web", "photo") else "web",
+           "chapter_images": d.get("chapter_images") if d.get("chapter_images") in ("google", "web", "photo", "ia")
+           else ("ia" if CF_ACCOUNT and CF_TOKEN else "web"),
            "ctx": ctx, "st": {"plan": plan, "intro": st.get("intro"), "bonus": st.get("bonus"), "concl": st.get("concl")}}
     with LOCK:
         JOBS[job["id"]] = job

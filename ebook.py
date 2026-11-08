@@ -1,5 +1,5 @@
 """Kopi — créateur d'ebooks : plan + rédaction par l'IA, illustrations, PDF pro et Word modifiable."""
-import os, re, io, json, math, random, time, datetime, urllib.parse
+import os, re, io, json, base64, math, random, time, datetime, urllib.parse
 
 import requests
 from PIL import Image, ImageDraw, ImageFilter
@@ -490,6 +490,72 @@ DOWN = {}  # service d'images en panne ou payant → on ne le réessaie pas avan
 
 def _down(name):
     return time.time() < DOWN.get(name, 0)
+
+
+def fetch_cloudflare(prompt, w, h, path, account, token, log=print, uni="moderne", seed=None):
+    """Illustration IA gratuite via Cloudflare Workers AI (FLUX.1 schnell, ~150 images/jour sur l'offre gratuite)."""
+    if not (account and token) or _down("cloudflare"):
+        return False
+    style = ", " + STYLES.get(uni, STYLES["moderne"])["img"]
+    body = {"prompt": (clean(prompt)[:700] + style + IMG_STYLE)[:2000], "steps": 8}
+    if seed is not None:
+        body["seed"] = int(seed) % 2_000_000_000
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/black-forest-labs/flux-1-schnell"
+    for attempt in range(3):
+        try:
+            r = requests.post(url, headers={"Authorization": f"Bearer {token}"}, json=body, timeout=90)
+            if r.status_code == 200:
+                b64 = (r.json().get("result") or {}).get("image")
+                if b64:
+                    im = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+                    tw, th = im.size
+                    ar = w / h
+                    if tw / th > ar:  # recadrage centré au bon format
+                        nw = int(th * ar); im = im.crop(((tw - nw) // 2, 0, (tw - nw) // 2 + nw, th))
+                    else:
+                        nh = int(tw / ar); im = im.crop((0, max(0, (th - nh) // 3), tw, max(0, (th - nh) // 3) + nh))
+                    im.save(path, "JPEG", quality=88, optimize=True)
+                    return True
+            txt = r.text[:200]
+            log(f"[ebook] Cloudflare {r.status_code} : {txt}")
+            if r.status_code in (401, 403):
+                DOWN["cloudflare"] = time.time() + 3600
+                log("[ebook] Cloudflare : clé refusée (vérifie CF_ACCOUNT_ID et CF_API_TOKEN)")
+                return False
+            if r.status_code == 429 or "neurons" in txt.lower() or "limit" in txt.lower():
+                DOWN["cloudflare"] = time.time() + 3 * 3600
+                log("[ebook] Cloudflare : quota gratuit du jour atteint")
+                return False
+        except Exception as e:
+            log(f"[ebook] Cloudflare en échec : {type(e).__name__} {str(e)[:80]}")
+        time.sleep(3 + attempt * 4)
+    return False
+
+
+def gen_inline_prompts(chat, plan, chapters, per_chapter=2):
+    """Choisit 1 ou 2 parties par chapitre à illustrer et écrit les descriptions d'images (en anglais)."""
+    items = []
+    for k, c in enumerate(chapters, 1):
+        heads = [b["text"] for b in parse_md(c.get("texte") or "") if b.get("t") == "h2"]
+        if len(heads) >= 2:
+            items.append({"k": k, "chapitre": c.get("titre", ""), "parties": [plain(h) for h in heads][:8]})
+    if not items:
+        return {}
+    sys_ = ("Tu prépares les illustrations d'un ebook. Pour chaque chapitre, choisis les " + str(per_chapter) +
+            " parties qui gagnent le plus à être illustrées (une scène concrète qui montre l'idée) et écris pour chacune "
+            "une description d'image en ANGLAIS : scène précise, personnes noires africaines si des personnes apparaissent, "
+            "décor africain moderne quand c'est pertinent, aucun texte ni lettre dans l'image, jamais de personne célèbre. "
+            "Reprends EXACTEMENT le texte de la partie choisie. Réponds UNIQUEMENT en JSON : "
+            "{\"chapitres\": [{\"k\": 1, \"images\": [{\"partie\": \"\", \"prompt\": \"\"}]}]}")
+    raw = chat([{"role": "system", "content": sys_},
+                {"role": "user", "content": f"Livre : {plan.get('titre', '')}\n" + json.dumps(items, ensure_ascii=False)[:9000]}],
+               max_tokens=4000, json_mode=True)
+    out = {}
+    for c in (json.loads(raw) if raw.strip().startswith("{") else {}).get("chapitres") or []:
+        imgs = [i for i in (c.get("images") or []) if isinstance(i, dict) and i.get("partie") and i.get("prompt")]
+        if imgs:
+            out[int(c.get("k") or 0)] = imgs[:per_chapter]
+    return out
 
 
 def fetch_image(prompt, w, h, seed, path, log=print, uni="moderne"):
@@ -1507,8 +1573,14 @@ def _build_pdf(book, path):
     for k, ch in enumerate(book["chapitres"], 1):
         story += opener(k, ch)
         blocks = parse_md(ch.get("texte", ""))
+        inl = {plain(i["partie"]).strip().lower(): i["img"] for i in ch.get("inline") or []
+               if i.get("img") and os.path.exists(i["img"])}
         for b in blocks:
             story += render(b)
+            key = plain(b.get("text", "")).strip().lower() if b.get("t") == "h2" else None
+            if key and key in inl:
+                story += [Spacer(1, 2), ShapedImage(crop_to(inl.pop(key), CW / (6.6 * cm), "in"), CW, 6.6 * cm, "round", CW),
+                          Spacer(1, .35 * cm)]
         story += notes(f"Ce que tu retiens · chapitre {k}", blocks)
     if book.get("bonus_texte"):
         story += [PageBreak()] + section_head("Bonus", book.get("bonus_titre") or "Ton plan d'action")

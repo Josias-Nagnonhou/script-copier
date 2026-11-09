@@ -140,6 +140,37 @@ def install_yt_cookies(text, source):
     YT.update(status="ok", source=source, updated=time.time())
 
 
+FB = {"status": "absent", "updated": None}
+
+
+def valid_fb_cookies(text):
+    lines = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+    return any("facebook.com" in l and len(l.split("\t")) >= 7 and l.split("\t")[5] in ("c_user", "xs") for l in lines)
+
+
+def install_fb_cookies(text):
+    p = os.path.join(BASE, "fb_cookies.txt")
+    with open(p, "w") as f:
+        f.write(text if text.startswith("# Netscape") else "# Netscape HTTP Cookie File\n" + text)
+    COOKIES["FB_COOKIES"] = p
+    FB.update(status="ok", updated=time.time())
+
+
+def fb_http():
+    """Session HTTP vers Facebook, connectée si des cookies Facebook ont été déposés."""
+    sess = requests.Session()
+    p = COOKIES.get("FB_COOKIES")
+    if p and os.path.exists(p):
+        import http.cookiejar
+        jar = http.cookiejar.MozillaCookieJar(p)
+        try:
+            jar.load(ignore_discard=True, ignore_expires=True)
+            sess.cookies = jar
+        except Exception as e:
+            print("Cookies Facebook illisibles :", str(e)[:100], flush=True)
+    return sess
+
+
 def load_cookies():
     # 1) fichier secret Render (permanent) 2) variable d'environnement
     for p in sorted(glob.glob("/etc/secrets/*")):
@@ -147,13 +178,15 @@ def load_cookies():
             t = open(p, encoding="utf-8", errors="ignore").read()
         except OSError:
             continue
-        if valid_yt_cookies(t):
+        if valid_fb_cookies(t):
+            install_fb_cookies(t)
+        if valid_yt_cookies(t) and YT["status"] != "ok":
             install_yt_cookies(t, "render")
-            return
     for k, v in os.environ.items():
-        if "COOKIE" in k.upper() and "TT" not in k.upper() and valid_yt_cookies(v):
+        if "COOKIE" in k.upper() and valid_fb_cookies(v) and FB["status"] != "ok":
+            install_fb_cookies(v)
+        if "COOKIE" in k.upper() and "TT" not in k.upper() and valid_yt_cookies(v) and YT["status"] != "ok":
             install_yt_cookies(v, "render")
-            return
 
 
 load_cookies()
@@ -162,7 +195,7 @@ if os.environ.get("TT_COOKIES"):
     with open(_p, "w") as f:
         f.write(os.environ["TT_COOKIES"])
     COOKIES["TT_COOKIES"] = _p
-print("Cookies YouTube :", YT["status"], flush=True)
+print("Cookies YouTube :", YT["status"], "| Facebook :", FB["status"], flush=True)
 
 JOBS = {}
 LOCK = threading.Lock()
@@ -172,7 +205,7 @@ LOCK = threading.Lock()
 def ydl_opts(platform, **extra):
     o = {"quiet": True, "no_warnings": True, "noprogress": True,
          "socket_timeout": 30, "retries": 3}
-    ck = COOKIES.get({"youtube": "YT_COOKIES", "tiktok": "TT_COOKIES"}.get(platform, ""))
+    ck = COOKIES.get({"youtube": "YT_COOKIES", "tiktok": "TT_COOKIES", "facebook": "FB_COOKIES"}.get(platform, ""))
     if ck:
         o["cookiefile"] = ck
     o.update(extra)
@@ -1472,7 +1505,7 @@ def fb_page_meta(url):
     for ua in ("facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"):
         try:
-            r = requests.get(url, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20)
+            r = fb_http().get(url, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20)
         except requests.RequestException:
             continue
         h = r.text
@@ -1513,8 +1546,8 @@ def fb_resolve(url):
         return url
     for ua in FB_UAS:
         try:
-            r = requests.get(url, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20,
-                             allow_redirects=True)
+            r = fb_http().get(url, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20,
+                              allow_redirects=True)
             fin = r.url
             if "login" in fin:  # Facebook renvoie vers la connexion : l'adresse finale est souvent dans « next »
                 m = re.search(r"[?&]next=([^&]+)", fin)
@@ -1539,7 +1572,7 @@ def fb_page_videos(page, limit):
         u = page + (("&sk=" + path.strip("/")) if "profile.php" in page and path else path)
         for ua in FB_UAS:
             try:
-                h = requests.get(u, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20).text
+                h = fb_http().get(u, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20).text
             except requests.RequestException:
                 continue
             for kind, vid in re.findall(r"(?:facebook\.com)?\\?/(?:[\w.\-]+\\?/)?(videos|reel|watch\\?/\?v=)\\?/?(\d{9,})", h):
@@ -1559,7 +1592,7 @@ def facebook_listing(job):
         if res != url:
             print(f"[analyse {job['id']}] lien Facebook résolu : {res[:150]}", flush=True)
         url = res
-    m = re.search(r"facebook\.com/people/[^/]+/(\d+)", url)
+    m = re.search(r"facebook\.com/people/[^/]+/(\d+)", url) or re.search(r"facebook\.com/p/[^/?]*?-?(\d{10,})/?", url)
     if m:  # profil « people » → adresse classique avec l'identifiant
         url = f"https://www.facebook.com/profile.php?id={m.group(1)}"
     pid = re.search(r"[?&]id=(\d+)", url)
@@ -1608,6 +1641,10 @@ def facebook_listing(job):
     if job.get("about"):
         meta["description"] = (meta["description"] + "\n" if meta["description"] else "") + job["about"][:1500]
     if not vids and not job.get("about") and not meta["description"]:
+        if FB["status"] != "ok":
+            raise RuntimeError("Facebook demande d'être connecté pour lire cette page. Clique sur « Connecter Facebook » "
+                               "juste au-dessus et dépose les cookies d'un compte Facebook secondaire, puis relance. "
+                               "Ou colle 3 à 10 liens de vidéos de la page dans « Liens de tes meilleures vidéos ».")
         raise RuntimeError("Facebook bloque la lecture automatique de cette page. Pour que l'analyse marche : colle 3 à 10 liens "
                            "de tes vidéos ou reels publics dans « Liens de tes meilleures vidéos » (sur ta vidéo : Partager → Copier le lien), "
                            "et/ou écris 2-3 phrases dans « Décris ta page », puis relance.")
@@ -3168,7 +3205,7 @@ def job_full(jid):
 def cookies_status():
     if not authed():
         return jsonify(error="Non connecté"), 401
-    return jsonify(status=YT["status"], source=YT["source"], updated=YT["updated"])
+    return jsonify(status=YT["status"], source=YT["source"], updated=YT["updated"], fb=FB["status"])
 
 
 @app.post("/api/cookies")
@@ -3183,6 +3220,12 @@ def cookies_upload():
           f"1re ligne : {text[:40]!r}", flush=True)
     if text.lstrip().startswith(("[", "{")):
         return jsonify(error="Ce fichier est au format JSON. Dans l'extension, choisis le format « Netscape » puis refais Export."), 400
+    if request.form.get("kind") == "fb" or (any("facebook.com" in l for l in lines) and not any("youtube.com" in l for l in lines)):
+        if not valid_fb_cookies(text):
+            return jsonify(error="Ce fichier ne contient pas les cookies d'un compte Facebook connecté. Connecte-toi sur "
+                                 "facebook.com, puis refais Export avec l'extension depuis facebook.com."), 400
+        install_fb_cookies(text)
+        return jsonify(status="ok", fb="ok")
     if lines and not any("youtube.com" in l for l in lines):
         return jsonify(error="Ce fichier ne contient pas de cookies YouTube : fais l'export en étant sur youtube.com."), 400
     if not valid_yt_cookies(text):

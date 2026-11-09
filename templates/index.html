@@ -278,6 +278,11 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .allrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:8px}.allrow select{width:auto;flex:1 1 180px}
 .allst{margin-top:10px}.allst .bar{margin-bottom:6px}.allst small{opacity:.75}
 #aAllDl{margin-top:10px}
+.fbconn{border:2px dashed var(--line,#e5e2da);border-radius:16px;padding:12px 14px;margin:4px 0 14px}
+.fbtop{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.fbst{font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:#fde8e6;color:#b42318}
+.fbst.ok{background:#e6f6ec;color:#167a3c}
+#fbConn.ok .steps,#fbConn.ok .hint{display:none}
 .ibhead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
 .ibhead h3 span{display:inline-block;background:#111;color:#d7ff3a;border-radius:999px;padding:2px 10px;font-size:.8em;margin-left:6px}
 .ibt{border:1px solid var(--line,#e5e2da);border-radius:14px;padding:4px 14px;margin:8px 0;background:var(--card,#fff)}
@@ -470,6 +475,21 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
         <label style="margin-top:14px">Quelles vidéos ?</label>
         <div class="seg" id="aSort"><button data-s="popular" class="on">Les plus vues</button><button data-s="recent">Les plus récentes</button></div>
         <div id="aFb" hidden>
+          <div class="fbconn" id="fbConn">
+            <div class="fbtop"><b>Connecter Facebook</b><span class="fbst" id="fbSt">non connecté</span></div>
+            <p class="hint" style="margin:4px 0 8px">Facebook cache les pages aux personnes non connectées. Comme pour YouTube, dépose les cookies d'un <b>compte Facebook secondaire</b> (pas ton compte principal) :</p>
+            <ol class="steps">
+              <li>Sur ordinateur, ouvre une fenêtre privée et connecte-toi à facebook.com avec ton compte secondaire.</li>
+              <li>Clique sur l'extension « Get cookies.txt LOCALLY », puis sur « Export » (format Netscape).</li>
+              <li>Ferme la fenêtre privée sans te déconnecter, puis dépose le fichier ici.</li>
+            </ol>
+            <label class="drop" id="fbDrop" for="fbFile" style="margin-top:8px">
+              <input type="file" id="fbFile" accept=".txt,text/plain">
+              <b id="fbDropT">Choisir le fichier cookies Facebook (.txt)</b>
+              <small>ou glisse-le ici</small>
+            </label>
+            <p class="ytmsg" id="fbMsg" role="status"></p>
+          </div>
           <label for="aLinks">Liens de tes meilleures vidéos ou reels Facebook <small>(conseillé · un par ligne)</small></label>
           <textarea id="aLinks" rows="4" placeholder="https://www.facebook.com/reel/...&#10;https://www.facebook.com/watch/?v=...&#10;https://fb.watch/..."></textarea>
           <label for="aAbout">Décris ta page en quelques phrases <small>(facultatif mais très utile)</small></label>
@@ -844,6 +864,17 @@ function copyText(t,btn,label){
   const fallback=()=>{const a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.cssText='position:absolute;left:-9999px;top:0';document.body.appendChild(a);a.select();a.setSelectionRange(0,t.length);let ok=false;try{ok=document.execCommand('copy')}catch(e){}a.remove();done(ok?'Copié ✓':'Copie bloquée : utilise le Word')};
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(()=>done('Copié ✓'),fallback)}else fallback();
 }
+/* ---------- cookies Facebook ---------- */
+function fbState(st){const ok=st==='ok';$('#fbSt').textContent=ok?'connecté ✓':'non connecté';$('#fbSt').classList.toggle('ok',ok);$('#fbConn').classList.toggle('ok',ok);$('#fbDropT').textContent=ok?'Remplacer les cookies Facebook (.txt)':'Choisir le fichier cookies Facebook (.txt)'}
+async function fbSend(f){$('#fbMsg').textContent='Envoi…';const fd=new FormData();fd.append('file',f);fd.append('kind','fb');
+  try{const r=await fetch('/api/cookies',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');
+    fbState('ok');$('#fbMsg').textContent='Facebook connecté ✓ Relance l\'analyse.'}
+  catch(e){$('#fbMsg').textContent=e.message}}
+$('#fbFile').onchange=e=>{if(e.target.files[0])fbSend(e.target.files[0])};
+['dragenter','dragover'].forEach(t=>$('#fbDrop').addEventListener(t,e=>{e.preventDefault();$('#fbDrop').classList.add('over')}));
+['dragleave','drop'].forEach(t=>$('#fbDrop').addEventListener(t,e=>{e.preventDefault();$('#fbDrop').classList.remove('over')}));
+$('#fbDrop').addEventListener('drop',e=>{if(e.dataTransfer.files[0])fbSend(e.dataTransfer.files[0])});
+fetch('/api/cookies').then(r=>r.json()).then(c=>fbState(c.fb)).catch(()=>{});
 /* ---------- onglets ---------- */
 const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
 function setMode(m){

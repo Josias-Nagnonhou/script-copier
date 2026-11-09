@@ -1503,12 +1503,68 @@ def fb_video_info(url):
             "uploader": e.get("uploader") or e.get("channel") or ""}
 
 
+FB_UAS = ("facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36")
+
+
+def fb_resolve(url):
+    """Lien de partage (facebook.com/share/…, fb.me, m.facebook…) → vraie adresse de la page, du profil ou de la vidéo."""
+    if not re.search(r"/share/|fb\.me/|l\.facebook\.com|m\.facebook\.com", url):
+        return url
+    for ua in FB_UAS:
+        try:
+            r = requests.get(url, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20,
+                             allow_redirects=True)
+            fin = r.url
+            if "login" in fin:  # Facebook renvoie vers la connexion : l'adresse finale est souvent dans « next »
+                m = re.search(r"[?&]next=([^&]+)", fin)
+                fin = requests.utils.unquote(m.group(1)) if m else ""
+            if not fin or "/share/" in fin:
+                m = re.search(r'<meta[^>]+property="og:url"[^>]+content="([^"]+)"', r.text) or \
+                    re.search(r'<link[^>]+rel="canonical"[^>]+href="([^"]+)"', r.text)
+                fin = html.unescape(m.group(1)) if m else fin
+            if fin and "facebook.com" in fin and "/share/" not in fin:
+                return fin
+        except requests.RequestException:
+            continue
+    return url
+
+
+def fb_page_videos(page, limit):
+    """Liens de vidéos / reels visibles dans le code public de la page (quand Facebook le montre)."""
+    found = []
+    for path in ("", "/videos", "/reels"):
+        if len(found) >= limit:
+            break
+        u = page + (("&sk=" + path.strip("/")) if "profile.php" in page and path else path)
+        for ua in FB_UAS:
+            try:
+                h = requests.get(u, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20).text
+            except requests.RequestException:
+                continue
+            for kind, vid in re.findall(r"(?:facebook\.com)?\\?/(?:[\w.\-]+\\?/)?(videos|reel|watch\\?/\?v=)\\?/?(\d{9,})", h):
+                link = f"https://www.facebook.com/reel/{vid}" if kind == "reel" else f"https://www.facebook.com/watch/?v={vid}"
+                if link not in found:
+                    found.append(link)
+            if found:
+                break
+    return found[:limit]
+
+
 def facebook_listing(job):
     """Page Facebook : infos publiques de la page + vidéos (onglets Vidéos/Reels si accessibles) + liens collés."""
     url, limit = job["url"], job["limit"]
+    if url:
+        res = fb_resolve(url)
+        if res != url:
+            print(f"[analyse {job['id']}] lien Facebook résolu : {res[:150]}", flush=True)
+        url = res
+    m = re.search(r"facebook\.com/people/[^/]+/(\d+)", url)
+    if m:  # profil « people » → adresse classique avec l'identifiant
+        url = f"https://www.facebook.com/profile.php?id={m.group(1)}"
     pid = re.search(r"[?&]id=(\d+)", url)
     page = f"https://www.facebook.com/profile.php?id={pid.group(1)}" if pid else url.split("?")[0].rstrip("/")
-    is_page = not re.search(r"/(videos?|reel|watch|share|posts|story)/|fb\.watch", page)
+    is_page = not re.search(r"/(videos?|reels?|watch|share|posts|story)/|fb\.watch|/watch$", page)
     if job["source"] == "Ma page Facebook":
         is_page = False
         url = ""
@@ -1528,6 +1584,14 @@ def facebook_listing(job):
                                      "views": e.get("view_count") or 0, "duration": e.get("duration") or 0})
             except Exception as e:
                 print(f"[analyse {job['id']}] Facebook {tab} : {str(e)[:120]}", flush=True)
+        if not vids:
+            try:
+                extra = fb_page_videos(page, min(limit, 15))
+                print(f"[analyse {job['id']}] Facebook : page « {meta['name'] or '?'} », {len(extra)} vidéos trouvées dans la page", flush=True)
+            except Exception as e:
+                extra = []
+                print(f"[analyse {job['id']}] Facebook page : {str(e)[:120]}", flush=True)
+            job["links"] = (job.get("links") or "") + "\n" + "\n".join(extra)
     links = list(dict.fromkeys(FB_LINK.findall(job.get("links") or "")))
     if not is_page and url:
         links.insert(0, url)

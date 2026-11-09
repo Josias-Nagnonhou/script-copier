@@ -499,6 +499,8 @@ def cleanup():
             if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
+                if j.get("pdf") and os.path.exists(j["pdf"]):
+                    os.remove(j["pdf"])
                 if j.get("dir"):
                     shutil.rmtree(j["dir"], ignore_errors=True)
                 del JOBS[jid]
@@ -1626,6 +1628,9 @@ def run_audit_job(job):
                  "moyenne_vues": int(sum(views) / len(views)) if views else 0,
                  "top": [{"title": v["title"][:120], "views": v["views"], "url": v["url"]} for v in by_views[:5]] if has_views else []}
         job["stats"] = stats
+        ordered = (by_views if has_views else vids) if job.get("sort") == "popular" else vids
+        job["vids"] = [{"url": v["url"], "title": v.get("title") or "", "views": v.get("views") or 0}
+                       for v in ordered if v.get("url")]
         scripts, comments = [], []
         if job["deep"]:
             pick = (by_views if has_views else vids)[:5]
@@ -1917,6 +1922,139 @@ def start_audit():
         JOBS[job["id"]] = job
     threading.Thread(target=run_audit_job, args=(job,), daemon=True).start()
     return jsonify(job_id=job["id"])
+
+
+# ------------------------------------------------ tous les scripts des vidéos analysées (Monétiser)
+def build_scripts_pdf(job, path):
+    """PDF propre : page de titre, sommaire, puis chaque script complet."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+    from xml.sax.saxutils import escape as x
+    fd = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+    for n, f in (("K-R", "DMSans-Regular.ttf"), ("K-B", "DMSans-Bold.ttf"), ("K-T", "Outfit-ExtraBold.ttf")):
+        try:
+            pdfmetrics.getFont(n)
+        except KeyError:
+            pdfmetrics.registerFont(TTFont(n, os.path.join(fd, f)))
+    ink, acc, mute = colors.HexColor("#14161C"), colors.HexColor("#E8473B"), colors.HexColor("#6B7280")
+    st = {"t": ParagraphStyle("t", fontName="K-T", fontSize=30, leading=36, textColor=ink, spaceAfter=10),
+          "s": ParagraphStyle("s", fontName="K-R", fontSize=12, leading=17, textColor=mute, spaceAfter=4),
+          "h": ParagraphStyle("h", fontName="K-T", fontSize=17, leading=22, textColor=ink, spaceBefore=6, spaceAfter=3),
+          "m": ParagraphStyle("m", fontName="K-R", fontSize=8.5, leading=12, textColor=mute, spaceAfter=10),
+          "b": ParagraphStyle("b", fontName="K-R", fontSize=10.5, leading=16, textColor=ink, spaceAfter=7),
+          "i": ParagraphStyle("i", fontName="K-R", fontSize=9.5, leading=14, textColor=ink, leftIndent=8),
+          "k": ParagraphStyle("k", fontName="K-B", fontSize=9, leading=12, textColor=acc, spaceAfter=2)}
+    done = [i for i in job["items"] if i["status"] == "done"]
+    els = [Spacer(1, 5 * cm), Paragraph("TOUS LES SCRIPTS", st["k"]), Paragraph(x(job["source_name"]), st["t"]),
+           Paragraph(f"{len(done)} script{'s' if len(done) > 1 else ''} complet{'s' if len(done) > 1 else ''} · "
+                     f"{'les plus vues d’abord' if job.get('sort') == 'popular' else 'les plus récentes d’abord'}", st["s"]),
+           Paragraph(datetime.date.today().strftime("%d/%m/%Y") + " · Kopi", st["s"]), PageBreak(),
+           Paragraph("Sommaire", st["h"]), Spacer(1, 6)]
+    for n, it in enumerate(done, 1):
+        v = f" · {fmt_num(it['views'])} vues" if it.get("views") else ""
+        els.append(Paragraph(f"<font name='K-B'>{n}.</font> {x((it['title'] or '')[:110])}<font color='#6B7280'>{v}</font>", st["i"]))
+    for n, it in enumerate(done, 1):
+        els += [PageBreak(), Paragraph(f"SCRIPT {n}", st["k"]), Paragraph(x((it["title"] or "")[:200]), st["h"]),
+                Paragraph(x(it["url"]) + (f" · {fmt_num(it['views'])} vues" if it.get("views") else "")
+                          + (f" · {x(it['method'])}" if it.get("method") else ""), st["m"])]
+        els += [Paragraph(x(p), st["b"]) for p in paragraphs(it["text"])]
+
+    def foot(c, d):
+        c.saveState()
+        c.setFont("K-R", 8)
+        c.setFillColor(mute)
+        c.drawString(2 * cm, 1.2 * cm, (job["source_name"] or "")[:80])
+        c.drawRightString(A4[0] - 2 * cm, 1.2 * cm, str(d.page))
+        c.restoreState()
+    doc = SimpleDocTemplate(path, pagesize=A4, leftMargin=2.2 * cm, rightMargin=2.2 * cm, topMargin=2 * cm,
+                            bottomMargin=2 * cm, title=f"Scripts — {job['source_name']}", author="Kopi")
+    doc.build(els, onFirstPage=lambda c, d: None, onLaterPages=foot)
+
+
+def run_scripts_list_job(job):
+    print(f"[scripts {job['id']}] « {job['source_name']} » : {len(job['items'])} vidéos", flush=True)
+    try:
+        job["phase"] = "transcribing"
+        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            list(ex.map(lambda it: process_item(job, it), job["items"]))
+        if not any(i["status"] == "done" for i in job["items"]):
+            raise RuntimeError(job.get("block_msg") or "Aucune vidéo n'a pu être transcrite.")
+        safe = re.sub(r"[^\w-]+", "_", job["source_name"])[:40].strip("_") or "scripts"
+        job["filename"] = f"Scripts_{safe}.docx"
+        job["file"] = os.path.join(BASE, job["id"] + ".docx")
+        build_docx(job, job["file"])
+        job["pdf"] = os.path.join(BASE, job["id"] + ".pdf")
+        try:
+            build_scripts_pdf(job, job["pdf"])
+        except Exception as e:
+            job["pdf"] = ""
+            print(f"[scripts {job['id']}] PDF impossible : {str(e)[:200]}", flush=True)
+        job["phase"] = "done"
+        print(f"[scripts {job['id']}] terminé : {sum(i['status'] == 'done' for i in job['items'])}/{len(job['items'])}", flush=True)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        print(f"[scripts {job['id']}] erreur : {msg[:200]}", flush=True)
+        job["phase"], job["error"] = "error", msg[:300]
+    job["finished"] = time.time()
+
+
+@app.post("/api/job/<jid>/allscripts")
+def audit_all_scripts(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    a = JOBS.get(jid)
+    if not a or a.get("platform") != "audit" or not a.get("vids"):
+        return jsonify(error="Analyse introuvable (le serveur a peut-être redémarré). Relance l'analyse."), 404
+    run = next((j for j in JOBS.values() if j.get("from_audit") == jid and not j.get("finished")), None)
+    if run:
+        return jsonify(job_id=run["id"])
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        n = int(d.get("count") or 0)
+    except ValueError:
+        n = 0
+    vids = a["vids"][:n] if n > 0 else a["vids"]
+    plat = a["src_platform"]
+    job = {"id": uuid.uuid4().hex[:12], "platform": plat, "source": a["source"], "url": a["url"],
+           "limit": len(vids), "sort": a.get("sort") or "recent", "lang": a.get("lang") or "", "phase": "queued",
+           "error": "", "source_name": a.get("source_name") or a["source"], "created": time.time(), "from_audit": jid,
+           "items": [{"n": i + 1, "url": v["url"], "title": v["title"], "views": v.get("views") or 0,
+                      "status": "pending", "msg": "", "method": "", "text": ""} for i, v in enumerate(vids)]}
+    with LOCK:
+        JOBS[job["id"]] = job
+    a["scripts_job"] = job["id"]
+    threading.Thread(target=run_scripts_list_job, args=(job,), daemon=True).start()
+    return jsonify(job_id=job["id"])
+
+
+@app.get("/api/job/<jid>/progress")
+def job_progress(jid):
+    """État léger (sans la liste des vidéos), pour les gros lots."""
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j:
+        return jsonify(error="Tâche introuvable (le serveur a peut-être redémarré)."), 404
+    its = j.get("items") or []
+    cnt = {k: sum(1 for i in its if i["status"] == k) for k in ("done", "error", "empty", "working")}
+    return jsonify(phase=j["phase"], error=j["error"], total=len(its), done=cnt["done"],
+                   failed=cnt["error"] + cnt["empty"], working=cnt["working"],
+                   has_pdf=bool(j.get("pdf")), source_name=j.get("source_name"))
+
+
+@app.get("/api/job/<jid>/pdf")
+def job_pdf(jid):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    if not j or not j.get("pdf") or not os.path.exists(j["pdf"]):
+        return "Fichier introuvable", 404
+    return send_file(j["pdf"], as_attachment=True, download_name=(j.get("filename") or "Scripts.docx")[:-5] + ".pdf")
 
 
 # ------------------------------------------------ créateur d'ebook
@@ -2947,7 +3085,8 @@ def job_report(jid):
     j = JOBS.get(jid)
     if not j or j.get("phase") != "done":
         return jsonify(error="Rapport introuvable"), 404
-    return jsonify(report=j["report"], stats=j.get("stats", {}), name=j["source_name"], platform=j.get("src_platform"))
+    return jsonify(report=j["report"], stats=j.get("stats", {}), name=j["source_name"], platform=j.get("src_platform"),
+                   n_vids=len(j.get("vids") or []), scripts_job=j.get("scripts_job") or "", sort=j.get("sort") or "recent")
 
 
 @app.get("/api/job/<jid>/full")

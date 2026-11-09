@@ -1569,7 +1569,23 @@ FB_VID_RX = [
     (re.compile(r"watch(?:\\?/|%2F)?(?:\?|%3F)v(?:=|%3D)(\d{9,})"), "watch"),
     (re.compile(r'"(?:video_id|videoID|videoId)"\s*:\s*"?(\d{9,})'), "watch"),
 ]
-FB_MOBILE_UA = "Mozilla/5.0 (Linux; Android 13; SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36"
+FB_MOBILE_UA = "Mozilla/5.0 (Linux; Android 13; SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+FB_DESK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
+
+def fb_headers(ua):
+    """En-têtes d'un vrai Chrome : sans eux, Facebook répond « Error » (code 400)."""
+    mob = "Mobile" in ua
+    h = {"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+         "Accept-Encoding": "gzip, deflate", "Upgrade-Insecure-Requests": "1", "Cache-Control": "max-age=0"}
+    if "Chrome" in ua:
+        h.update({"Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none",
+                  "Sec-Fetch-User": "?1",
+                  "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+                  "sec-ch-ua-mobile": "?1" if mob else "?0",
+                  "sec-ch-ua-platform": '"Android"' if mob else '"Windows"'})
+    return h
 
 
 def fb_page_videos(page, limit, log=None):
@@ -1585,14 +1601,14 @@ def fb_page_videos(page, limit, log=None):
     for base, sep in bases:
         mob = "m.facebook" in base
         for tab in (("videos", "reels", "") if mob else ("videos", "reels_tab", "")):
-            tries.append((base + (sep + tab if tab else ""), FB_MOBILE_UA if mob else FB_UAS[1]))
+            tries.append((base + (sep + tab if tab else ""), FB_MOBILE_UA if mob else FB_DESK_UA))
+    tries.append((bases[0][0], FB_UAS[0]))  # aperçu de lien (souvent accepté même quand le reste est refusé)
     sess = fb_http()
     for u, ua in tries:
         if len(found) >= limit:
             break
         try:
-            r = sess.get(u, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9",
-                                     "Accept": "text/html,application/xhtml+xml"}, timeout=25)
+            r = sess.get(u, headers=fb_headers(ua), timeout=25)
             h = r.text
         except requests.RequestException as e:
             if log:
@@ -1613,7 +1629,9 @@ def fb_page_videos(page, limit, log=None):
                     found.append(link)
         if log:
             log(f"Facebook {u.split('facebook.com')[1][:60]} → code {r.status_code}, {len(h) // 1000} ko, "
-                f"connexion demandée={'login' in r.url or 'login_form' in h}, vidéos +{len(found) - before}")
+                f"connexion demandée={'login' in r.url or 'login_form' in h}, vidéos +{len(found) - before}"
+                + (f", titre « {re.sub(r'<[^>]+>', '', (re.search(r'<title[^>]*>(.*?)</title>', h, re.S) or [None, ''])[1])[:60]} »"
+                   if r.status_code >= 400 else ""))
     return found[:limit], name
 
 

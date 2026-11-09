@@ -866,15 +866,19 @@ function copyText(t,btn,label){
 }
 /* ---------- cookies Facebook ---------- */
 function fbState(st){const ok=st==='ok';$('#fbSt').textContent=ok?'connecté ✓':'non connecté';$('#fbSt').classList.toggle('ok',ok);$('#fbConn').classList.toggle('ok',ok);$('#fbDropT').textContent=ok?'Remplacer les cookies Facebook (.txt)':'Choisir le fichier cookies Facebook (.txt)'}
-async function fbSend(f){$('#fbMsg').textContent='Envoi…';const fd=new FormData();fd.append('file',f);fd.append('kind','fb');
+async function fbSend(f,quiet){if(!quiet)$('#fbMsg').textContent='Envoi…';const fd=new FormData();fd.append('file',f);fd.append('kind','fb');
   try{const r=await fetch('/api/cookies',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');
-    fbState('ok');$('#fbMsg').textContent='Facebook connecté ✓ Relance l\'analyse.'}
-  catch(e){$('#fbMsg').textContent=e.message}}
+    fbState('ok');if(!quiet)$('#fbMsg').textContent='Facebook connecté ✓ Relance l\'analyse.';
+    try{const t=typeof f==='string'?f:await f.text();localStorage.setItem('fbCookies',t)}catch(_){}
+    return true}
+  catch(e){if(!quiet)$('#fbMsg').textContent=e.message;return false}}
+async function fbEnsure(){try{const c=await (await fetch('/api/cookies')).json();if(c.fb==='ok'){fbState('ok');return}
+  const t=localStorage.getItem('fbCookies');if(t){await fbSend(new Blob([t],{type:'text/plain'}),true)}else fbState(c.fb)}catch(e){}}
 $('#fbFile').onchange=e=>{if(e.target.files[0])fbSend(e.target.files[0])};
 ['dragenter','dragover'].forEach(t=>$('#fbDrop').addEventListener(t,e=>{e.preventDefault();$('#fbDrop').classList.add('over')}));
 ['dragleave','drop'].forEach(t=>$('#fbDrop').addEventListener(t,e=>{e.preventDefault();$('#fbDrop').classList.remove('over')}));
 $('#fbDrop').addEventListener('drop',e=>{if(e.dataTransfer.files[0])fbSend(e.dataTransfer.files[0])});
-fetch('/api/cookies').then(r=>r.json()).then(c=>fbState(c.fb)).catch(()=>{});
+fbEnsure();
 /* ---------- onglets ---------- */
 const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
 function setMode(m){
@@ -1120,6 +1124,7 @@ $('#aGo').onclick=async()=>{
   const source=$('#aSource').value.trim(),fb=aPlat==='facebook',links=fb?$('#aLinks').value.trim():'',about=fb?$('#aAbout').value.trim():'';
   if(!source&&!(fb&&(links||about))){$('#aSource').focus();return}
   aSetBusy(true);aProg(0);$('#aDl').setAttribute('aria-disabled','true');
+  if(fb)await fbEnsure();
   try{const r=await fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:aPlat,source,links,about,all:aLimit==='all',limit:aLimit==='all'?3000:aLimit==='custom'?(+$('#aCustom').value||40):aLimit,sort:aSortV,deep:$('#aDeep').checked,lang:''})});
     const d=await r.json();if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('auJob',d.job_id)}catch(e){}aWatch(d.job_id)}
   catch(e){aErr(e.message)}

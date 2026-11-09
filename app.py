@@ -1563,25 +1563,58 @@ def fb_resolve(url):
     return url
 
 
-def fb_page_videos(page, limit):
-    """Liens de vidéos / reels visibles dans le code public de la page (quand Facebook le montre)."""
-    found = []
-    for path in ("", "/videos", "/reels"):
+FB_VID_RX = [
+    (re.compile(r"(?:\\?/|%2F)reel(?:\\?/|%2F)(\d{9,})"), "reel"),
+    (re.compile(r"(?:\\?/|%2F)videos(?:\\?/|%2F)(?:[\w.\-]+(?:\\?/|%2F))?(\d{9,})"), "watch"),
+    (re.compile(r"watch(?:\\?/|%2F)?(?:\?|%3F)v(?:=|%3D)(\d{9,})"), "watch"),
+    (re.compile(r'"(?:video_id|videoID|videoId)"\s*:\s*"?(\d{9,})'), "watch"),
+]
+FB_MOBILE_UA = "Mozilla/5.0 (Linux; Android 13; SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36"
+
+
+def fb_page_videos(page, limit, log=None):
+    """Liens de vidéos / reels présents dans le code de la page (version ordinateur et version mobile)."""
+    found, name = [], ""
+    pid = re.search(r"[?&]id=(\d+)", page)
+    if pid:
+        bases = [(f"https://www.facebook.com/profile.php?id={pid.group(1)}", "&sk="),
+                 (f"https://m.facebook.com/profile.php?id={pid.group(1)}", "&v=")]
+    else:
+        bases = [(page, "/"), (page.replace("www.facebook.com", "m.facebook.com"), "/")]
+    tries = []
+    for base, sep in bases:
+        mob = "m.facebook" in base
+        for tab in (("videos", "reels", "") if mob else ("videos", "reels_tab", "")):
+            tries.append((base + (sep + tab if tab else ""), FB_MOBILE_UA if mob else FB_UAS[1]))
+    sess = fb_http()
+    for u, ua in tries:
         if len(found) >= limit:
             break
-        u = page + (("&sk=" + path.strip("/")) if "profile.php" in page and path else path)
-        for ua in FB_UAS:
-            try:
-                h = fb_http().get(u, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=20).text
-            except requests.RequestException:
-                continue
-            for kind, vid in re.findall(r"(?:facebook\.com)?\\?/(?:[\w.\-]+\\?/)?(videos|reel|watch\\?/\?v=)\\?/?(\d{9,})", h):
+        try:
+            r = sess.get(u, headers={"User-Agent": ua, "Accept-Language": "fr-FR,fr;q=0.9",
+                                     "Accept": "text/html,application/xhtml+xml"}, timeout=25)
+            h = r.text
+        except requests.RequestException as e:
+            if log:
+                log(f"Facebook {u[:70]} : {str(e)[:80]}")
+            continue
+        if not name:
+            t = re.search(r"<title[^>]*>([^<]{2,120})</title>", h)
+            if t:
+                nm = html.unescape(t.group(1)).split("|")[0].strip()
+                if nm.lower() not in ("facebook", "log in or sign up to view", "connexion", "se connecter à facebook",
+                                      "log into facebook", "error"):
+                    name = nm
+        before = len(found)
+        for rx, kind in FB_VID_RX:
+            for vid in rx.findall(h):
                 link = f"https://www.facebook.com/reel/{vid}" if kind == "reel" else f"https://www.facebook.com/watch/?v={vid}"
-                if link not in found:
+                if link not in found and not any(vid in f for f in found):
                     found.append(link)
-            if found:
-                break
-    return found[:limit]
+        if log:
+            log(f"Facebook {u.split('facebook.com')[1][:60]} → code {r.status_code}, {len(h) // 1000} ko, "
+                f"connexion demandée={'login' in r.url or 'login_form' in h}, vidéos +{len(found) - before}")
+    return found[:limit], name
 
 
 def facebook_listing(job):
@@ -1604,7 +1637,7 @@ def facebook_listing(job):
     meta = fb_page_meta(page) if is_page else {"name": "", "followers": 0, "description": ""}
     vids, seen = [], set()
     if is_page:
-        for tab in (("&sk=videos", "&sk=reels_tab") if pid else ("/videos", "/reels")):
+        for tab in ():  # yt-dlp ne sait pas lister les onglets d'une page Facebook : on lit la page nous-mêmes
             try:
                 opts = ydl_opts("facebook", extract_flat="in_playlist", skip_download=True, ignoreerrors=True, playlistend=limit)
                 with yt_dlp.YoutubeDL(opts) as y:
@@ -1619,7 +1652,8 @@ def facebook_listing(job):
                 print(f"[analyse {job['id']}] Facebook {tab} : {str(e)[:120]}", flush=True)
         if not vids:
             try:
-                extra = fb_page_videos(page, min(limit, 15))
+                extra, nm = fb_page_videos(page, min(limit, 20), log=lambda m: print(f"[analyse {job['id']}] {m}", flush=True))
+                meta["name"] = meta["name"] or nm
                 print(f"[analyse {job['id']}] Facebook : page « {meta['name'] or '?'} », {len(extra)} vidéos trouvées dans la page", flush=True)
             except Exception as e:
                 extra = []

@@ -351,7 +351,7 @@ def groq_transcribe(path, lang):
     data = {"model": GROQ_MODEL, "response_format": "text", "temperature": "0"}
     if lang:
         data["language"] = lang
-    for attempt in range(6):
+    for attempt in range(14):
         with open(path, "rb") as f:
             r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
                               headers={"Authorization": f"Bearer {GROQ_KEY}"},
@@ -364,7 +364,7 @@ def groq_transcribe(path, lang):
                 wait = float(wait)
             except (TypeError, ValueError):
                 wait = 15 * (attempt + 1)
-            time.sleep(min(max(wait, 3), 120))
+            time.sleep(min(max(wait, 3), 300))
             continue
         if r.status_code == 401:
             raise RuntimeError("Clé Groq invalide.")
@@ -1211,6 +1211,22 @@ def job_video(jid, n):
                      mimetype="video/mp4", max_age=0)
 
 
+def media_duration(path):
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                              "-of", "default=nw=1:nk=1", path], capture_output=True, text=True, timeout=60)
+        return float(out.stdout.strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def ff(args, timeout=300):
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"] + args,
+                       capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0:
+        raise RuntimeError("Conversion impossible : " + (r.stderr.strip().splitlines() or ["erreur ffmpeg"])[-1][:150])
+
+
 # ------------------------------------------------ Montage auto : silences et répétitions
 CUT_LEVELS = {  # pause gardée au maximum entre deux mots, marge avant / après la parole
     "leger": (0.60, 0.15, 0.20),
@@ -1268,17 +1284,22 @@ def montage_repeats(job, phrases):
         job["step"] = "Recherche des répétitions…" + (f" · {b // 120 + 1}/{(len(phrases) + 119) // 120}" if len(phrases) > 120 else "")
         listing = "\n".join(f"[{p['id']}] {p['text']}" for p in batch)
         prompt = (
-            "Voici la transcription d'une courte vidéo, découpée en morceaux numérotés.\n"
-            "Je veux une vidéo fluide, rapide et naturelle. Repère les morceaux À SUPPRIMER :\n"
+            "Voici la transcription d'une vidéo (morceaux numérotés, dans l'ordre).\n"
+            "Je veux la même vidéo, mais avec une parole fluide, dynamique, sans temps mort : on garde seulement "
+            "ce qui intéresse le spectateur. Repère les morceaux À SUPPRIMER :\n"
             "- une même idée ou phrase dite 2 ou 3 fois : garde la version la plus complète et la mieux dite "
             "(souvent la dernière), supprime les autres ;\n"
             "- les faux départs : phrase commencée puis abandonnée et reprise juste après ;\n"
-            "- les bégaiements et hésitations seuls (« euh », « donc donc », « en fait en fait »).\n"
-            "Règles strictes : ne supprime JAMAIS une information qui n'est dite qu'une fois, ni une étape d'une "
-            "astuce, ni un ingrédient, une quantité ou un conseil. En cas de doute, garde. Le texte gardé doit "
-            "rester compréhensible et s'enchaîner naturellement.\n\n"
+            "- les bégaiements et hésitations (« euh », « donc donc », « en fait en fait », « comment dire ») ;\n"
+            "- les passages sans intérêt : bavardage qui tourne en rond, digression hors sujet, la personne qui "
+            "cherche ses mots, se parle à elle-même, parle à quelqu'un hors caméra, règle son matériel, "
+            "« attends », « je reprends », « on coupe », « c'est bon ça tourne ? ».\n"
+            "Règles strictes : ne supprime JAMAIS une information utile dite une seule fois, ni une étape, un "
+            "chiffre, un exemple, une histoire, une chute ou un conseil. Garde l'introduction et la conclusion. "
+            "En cas de doute, garde. Le texte gardé doit rester compréhensible et s'enchaîner naturellement.\n\n"
             f"{listing}\n\n"
-            'Réponds uniquement en JSON : {"supprimer": [{"id": 3, "raison": "répétition de 5"}]}. '
+            'Réponds uniquement en JSON : {"supprimer": [{"id": 3, "raison": "répétition de 5"}]} '
+            '(raison courte : répétition, faux départ, hésitation, hors sujet, temps mort). '
             'Liste vide si rien à supprimer.')
         try:
             out = parse_json_obj(groq_chat([{"role": "user", "content": prompt}], max_tokens=3000,
@@ -1297,9 +1318,9 @@ def montage_repeats(job, phrases):
                 drop.add(pid)
                 notes.append({"id": pid, "text": next(p["text"] for p in phrases if p["id"] == pid),
                               "why": (x.get("raison") if isinstance(x, dict) else "") or "répétition"})
-    # garde-fou : jamais plus d'un tiers du texte supprimé
-    if len(drop) > len(phrases) / 3:
-        keep_n = int(len(phrases) / 3)
+    # garde-fou : jamais plus de 40 % du texte supprimé
+    if len(drop) > len(phrases) * 0.4:
+        keep_n = int(len(phrases) * 0.4)
         notes = notes[:keep_n]
         drop = {n["id"] for n in notes}
     notes.sort(key=lambda n: n["id"])
@@ -1336,19 +1357,68 @@ def montage_keep(words, phrases, drop, level, fillers, fps, total):
     return out
 
 
-def montage_render(src, dst, spans, fps):
-    expr = "+".join(f"between(t,{a:.4f},{b - 0.5 / fps:.4f})" for a, b in spans)
-    aexpr = "+".join(f"between(t,{a:.4f},{b:.4f})" for a, b in spans)
+def _render_block(src, dst, spans, fps, t0, t1, scale):
+    """Monte un bloc [t0, t1] : seules les parties gardées de ce bloc, réencodées légèrement."""
+    rel = [(max(a, t0) - t0, min(b, t1) - t0) for a, b in spans if b > t0 and a < t1]
+    rel = [(a, b) for a, b in rel if b - a >= 1.5 / fps]
+    if not rel:
+        return False
+    expr = "+".join(f"between(t,{a:.4f},{b - 0.5 / fps:.4f})" for a, b in rel)
+    aexpr = "+".join(f"between(t,{a:.4f},{b:.4f})" for a, b in rel)
+    vf = f"fps={fps:.4f},select='{expr}',setpts=N/FRAME_RATE/TB" + (f",{scale}" if scale else "")
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, dir=os.path.dirname(dst)) as f:
-        f.write(f"[0:v]fps={fps:.4f},select='{expr}',setpts=N/FRAME_RATE/TB[v];"
-                f"[0:a]aselect='{aexpr}',asetpts=N/SR/TB,aresample=async=1[a]")
+        f.write(f"[0:v]{vf}[v];[0:a]aselect='{aexpr}',asetpts=N/SR/TB,aresample=async=1[a]")
         graph = f.name
     try:
-        ff(["-i", src, "-filter_complex_script", graph, "-map", "[v]", "-map", "[a]",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", dst], timeout=3600)
+        ff(["-ss", f"{t0:.3f}", "-t", f"{t1 - t0:.3f}", "-i", src, "-filter_complex_script", graph,
+            "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "superfast" if LIGHT else "veryfast",
+            "-crf", "21", "-pix_fmt", "yuv420p", "-threads", FF_THREADS, "-g", str(int(fps * 4)),
+            "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", dst], timeout=3600)
     finally:
         os.remove(graph)
+    return os.path.exists(dst) and os.path.getsize(dst) > 0
+
+
+def montage_render(src, dst, spans, fps, job=None):
+    """Monte la vidéo par blocs de 2 minutes (léger en mémoire, avance visible), puis recolle sans réencoder."""
+    total = max(b for a, b in spans)
+    scale = "scale='if(gt(ih,iw),min(720,iw),-2)':'if(gt(ih,iw),-2,min(720,ih))'" if LIGHT else ""
+    block = 120.0
+    d = tempfile.mkdtemp(dir=os.path.dirname(dst))
+    parts, t0, k, t_start = [], 0.0, 0, time.time()
+    n_blocks = max(1, int(total // block) + 1)
+    try:
+        while t0 < total:
+            t1 = min(total, t0 + block)
+            # on coupe le bloc dans une pause : jamais au milieu d'un passage gardé
+            inside = [b for a, b in spans if a < t1 < b]
+            if inside:
+                t1 = max(inside)
+            out = os.path.join(d, f"b_{k:04d}.mp4")
+            if HEAVY:
+                HEAVY.acquire()
+            try:
+                ok = _render_block(src, out, spans, fps, t0, t1, scale)
+            finally:
+                if HEAVY:
+                    HEAVY.release()
+            if ok:
+                parts.append(out)
+            k += 1
+            t0 = t1
+            if job is not None:
+                el = time.time() - t_start
+                left = el / max(t0, 1) * (total - t0)
+                job["step"] = (f"Montage de la vidéo… {min(99, int(t0 / total * 100))} %"
+                               + (f" · encore environ {max(1, int(left // 60))} min" if t0 > 60 else ""))
+        if not parts:
+            raise RuntimeError("Rien à garder après le montage.")
+        lst = os.path.join(d, "list.txt")
+        with open(lst, "w") as f:
+            f.write("".join(f"file '{p}'\n" for p in parts))
+        ff(["-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", "-movflags", "+faststart", dst], timeout=1800)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def run_montage_job(job, upload=None):
@@ -1387,7 +1457,7 @@ def run_montage_job(job, upload=None):
             raise RuntimeError("Rien à garder après le montage.")
         job["step"] = "Montage de la vidéo…"
         out = os.path.join(d, "montage.mp4")
-        montage_render(src, out, spans, fps)
+        montage_render(src, out, spans, fps, job)
         after = media_duration(out)
         base = re.sub(r"[^\w-]+", "_", os.path.splitext(job["source"] or "video")[0])[:40].strip("_") or "video"
         job.update(file=out, filename=f"{base}_monte.mp4", after=round(after, 1), cuts=max(0, len(spans) - 1),

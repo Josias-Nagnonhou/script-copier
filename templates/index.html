@@ -1125,6 +1125,26 @@ function oWatch(id){
 }
 try{const j=localStorage.getItem('moJob');if(j)oWatch(j)}catch(e){}
 
+$('#mGal').onclick=e=>{
+  const sv=e.target.closest('.gsave'),vw=e.target.closest('.gview');
+  if(sv){const it=mItems.find(x=>x.n===+sv.dataset.n);if(it)mSaveOne(mJob,it.n,it.name);return}
+  if(vw)lbOpen(+vw.dataset.n);
+};
+let lbN=0;
+function lbPhotos(){return mItems.filter(i=>i.status==='done'&&i.kind==='photo')}
+function lbShow(){const ph=lbPhotos(),k=ph.findIndex(x=>x.n===lbN);if(k<0)return;const it=ph[k];
+  $('#lbImg').src=`/api/job/${mJob}/m/${it.n}`;$('#lbImg').alt=it.title;$('#lbCap').textContent=`${it.title} · ${k+1}/${ph.length}`;
+  $('#lbPrev').hidden=k===0;$('#lbNext').hidden=k===ph.length-1}
+function lbOpen(n){if(!mJob)return;lbN=n;$('#lb').hidden=false;document.body.style.overflow='hidden';lbShow();$('#lbClose').focus()}
+function lbClose(){$('#lb').hidden=true;document.body.style.overflow='';$('#lbImg').removeAttribute('src')}
+function lbStep(dir){const ph=lbPhotos(),k=ph.findIndex(x=>x.n===lbN);const nx=ph[k+dir];if(nx){lbN=nx.n;lbShow()}}
+$('#lbClose').onclick=lbClose;$('#lbPrev').onclick=()=>lbStep(-1);$('#lbNext').onclick=()=>lbStep(1);
+$('#lbSave').onclick=()=>{const it=mItems.find(x=>x.n===lbN);if(it)mSaveOne(mJob,it.n,it.name)};
+$('#lb').addEventListener('click',e=>{if(e.target.id==='lb')lbClose()});
+document.addEventListener('keydown',e=>{if($('#lb').hidden)return;if(e.key==='Escape')lbClose();if(e.key==='ArrowLeft')lbStep(-1);if(e.key==='ArrowRight')lbStep(1)});
+let lbX=null;$('#lb').addEventListener('touchstart',e=>{lbX=e.touches[0].clientX},{passive:true});
+$('#lb').addEventListener('touchend',e=>{if(lbX===null)return;const dx=e.changedTouches[0].clientX-lbX;if(Math.abs(dx)>50)lbStep(dx<0?1:-1);lbX=null});
+
 /* ---------- monétisation ---------- */
 let aPlat='youtube',aLimit=40,aTimer=null,aBusy=false,aCur=null;
 document.querySelectorAll('#aPlat button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#aPlat button').forEach(x=>x.classList.remove('on'));b.classList.add('on');aPlat=b.dataset.p;

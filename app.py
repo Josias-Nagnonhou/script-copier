@@ -528,7 +528,7 @@ def cleanup():
     with LOCK:
         for jid in list(JOBS):
             j = JOBS[jid]
-            keep = {"download": 2, "media": 2, "clip": 3, "wa": 2}.get(j["platform"], 6) * 3600
+            keep = {"download": 2, "media": 2, "clip": 3, "wa": 2, "montage": 3}.get(j["platform"], 6) * 3600
             if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
@@ -1386,6 +1386,252 @@ def start_wa():
         JOBS[jid] = job
     threading.Thread(target=run_wa_job, args=(job, upload), daemon=True).start()
     return jsonify(job_id=jid)
+
+
+# ------------------------------------------------ Montage auto : silences et répétitions
+CUT_LEVELS = {  # pause gardée au maximum entre deux mots, marge avant / après la parole
+    "leger": (0.60, 0.15, 0.20),
+    "normal": (0.35, 0.08, 0.14),
+    "dynamique": (0.18, 0.05, 0.09),
+}
+FILLERS = re.compile(r"^(euh+|heu+|hum+|hmm+|mmh+|bah|ben|uh+|um+|erm)[.,!?…]*$", re.I)
+
+
+def video_fps(path):
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "stream=avg_frame_rate", "-of", "default=nw=1:nk=1", path],
+                             capture_output=True, text=True, timeout=60).stdout.strip()
+        a, b = (out.split("/") + ["1"])[:2]
+        f = float(a) / float(b or 1)
+        return f if 10 <= f <= 61 else 30.0
+    except Exception:
+        return 30.0
+
+
+def montage_words(job, src, tmp):
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000",
+                    "-b:a", "32k", "-f", "segment", "-segment_time", "600",
+                    os.path.join(tmp, "part_%03d.mp3")], check=True)
+    parts = sorted(glob.glob(os.path.join(tmp, "part_*.mp3")))
+    if not parts:
+        raise RuntimeError("Cette vidéo n'a pas de son.")
+    words, offset = [], 0.0
+    for i, p in enumerate(parts, 1):
+        job["step"] = "Écoute de la vidéo…" + (f" · partie {i}/{len(parts)}" if len(parts) > 1 else "")
+        words += [[a + offset, b + offset, w] for a, b, w in groq_words(p, job["lang"])]
+        offset += probe_duration(p) or 600
+        os.remove(p)
+    return clean_words(words)
+
+
+def montage_phrases(words):
+    """Découpe en petites phrases numérotées (sur la ponctuation ou les pauses)."""
+    phrases, i = [], 0
+    for k, w in enumerate(words):
+        gap = words[k + 1][0] - w[1] if k + 1 < len(words) else 99
+        if re.search(r"[.!?…]$", w[2]) or gap >= 0.5 or k - i >= 25 or k == len(words) - 1:
+            phrases.append({"id": len(phrases) + 1, "wi": i, "wj": k,
+                            "text": " ".join(x[2] for x in words[i:k + 1])})
+            i = k + 1
+    return phrases
+
+
+def montage_repeats(job, phrases):
+    """L'IA repère les phrases répétées, faux départs et reprises à supprimer."""
+    drop, notes = set(), []
+    for b in range(0, len(phrases), 120):
+        batch = phrases[max(0, b - 6):b + 120]  # un peu de recouvrement pour voir les répétitions en bordure
+        job["step"] = "Recherche des répétitions…" + (f" · {b // 120 + 1}/{(len(phrases) + 119) // 120}" if len(phrases) > 120 else "")
+        listing = "\n".join(f"[{p['id']}] {p['text']}" for p in batch)
+        prompt = (
+            "Voici la transcription d'une courte vidéo, découpée en morceaux numérotés.\n"
+            "Je veux une vidéo fluide, rapide et naturelle. Repère les morceaux À SUPPRIMER :\n"
+            "- une même idée ou phrase dite 2 ou 3 fois : garde la version la plus complète et la mieux dite "
+            "(souvent la dernière), supprime les autres ;\n"
+            "- les faux départs : phrase commencée puis abandonnée et reprise juste après ;\n"
+            "- les bégaiements et hésitations seuls (« euh », « donc donc », « en fait en fait »).\n"
+            "Règles strictes : ne supprime JAMAIS une information qui n'est dite qu'une fois, ni une étape d'une "
+            "astuce, ni un ingrédient, une quantité ou un conseil. En cas de doute, garde. Le texte gardé doit "
+            "rester compréhensible et s'enchaîner naturellement.\n\n"
+            f"{listing}\n\n"
+            'Réponds uniquement en JSON : {"supprimer": [{"id": 3, "raison": "répétition de 5"}]}. '
+            'Liste vide si rien à supprimer.')
+        try:
+            out = parse_json_obj(groq_chat([{"role": "user", "content": prompt}], max_tokens=3000,
+                                           json_mode=True, tag="montage"))
+        except Exception as e:
+            print(f"[montage {job['id']}] analyse des répétitions impossible : {str(e)[:120]}", flush=True)
+            job["warn"] = "Les répétitions n'ont pas pu être analysées (IA indisponible) : seuls les silences sont coupés."
+            return set(), []
+        ids = {p["id"] for p in batch}
+        for x in out.get("supprimer") or []:
+            try:
+                pid = int(x.get("id") if isinstance(x, dict) else x)
+            except (TypeError, ValueError):
+                continue
+            if pid in ids and pid not in drop:
+                drop.add(pid)
+                notes.append({"id": pid, "text": next(p["text"] for p in phrases if p["id"] == pid),
+                              "why": (x.get("raison") if isinstance(x, dict) else "") or "répétition"})
+    # garde-fou : jamais plus d'un tiers du texte supprimé
+    if len(drop) > len(phrases) / 3:
+        keep_n = int(len(phrases) / 3)
+        notes = notes[:keep_n]
+        drop = {n["id"] for n in notes}
+    notes.sort(key=lambda n: n["id"])
+    return drop, notes
+
+
+def montage_keep(words, phrases, drop, level, fillers, fps, total):
+    maxgap, pre, post = CUT_LEVELS[level]
+    kept = []  # (indice du mot, mot)
+    for p in phrases:
+        if p["id"] in drop:
+            continue
+        for k in range(p["wi"], p["wj"] + 1):
+            if fillers and FILLERS.match(words[k][2]):
+                continue
+            kept.append((k, words[k]))
+    spans, prev = [], None
+    for k, w in kept:
+        a, b = max(0.0, w[0] - pre), min(total, w[1] + post)
+        # même passage si le mot suit directement le précédent avec une pause courte
+        if spans and prev is not None and k == prev[0] + 1 and w[0] - prev[1][1] <= maxgap:
+            spans[-1][1] = max(spans[-1][1], b)
+        elif spans and a <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], b)
+        else:
+            spans.append([a, b])
+        prev = (k, w)
+    # on cale chaque coupe sur une image pour garder le son et l'image synchronisés
+    out = []
+    for a, b in spans:
+        a, b = round(a * fps) / fps, round(b * fps) / fps
+        if b - a >= 1.5 / fps:
+            out.append((a, b))
+    return out
+
+
+def montage_render(src, dst, spans, fps):
+    expr = "+".join(f"between(t,{a:.4f},{b - 0.5 / fps:.4f})" for a, b in spans)
+    aexpr = "+".join(f"between(t,{a:.4f},{b:.4f})" for a, b in spans)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, dir=os.path.dirname(dst)) as f:
+        f.write(f"[0:v]fps={fps:.4f},select='{expr}',setpts=N/FRAME_RATE/TB[v];"
+                f"[0:a]aselect='{aexpr}',asetpts=N/SR/TB,aresample=async=1[a]")
+        graph = f.name
+    try:
+        ff(["-i", src, "-filter_complex_script", graph, "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", dst], timeout=3600)
+    finally:
+        os.remove(graph)
+
+
+def run_montage_job(job, upload=None):
+    print(f"[montage {job['id']}] {job['url'] or job['source']} ({job['level']})", flush=True)
+    d = os.path.join(BASE, "v_" + job["id"])
+    os.makedirs(d, exist_ok=True)
+    job["dir"] = d
+    try:
+        job["phase"] = "listing"
+        if upload:
+            src = upload
+        else:
+            job["step"] = "Téléchargement de la vidéo…"
+            site, author, text, media = extract_post(job["url"])
+            media = [m for m in media if m["kind"] in ("video", "ytdlp")]
+            if not media:
+                raise RuntimeError("Aucune vidéo à ce lien.")
+            it = {"n": 1, "url": media[0]["url"], "kind": media[0]["kind"]}
+            src = fetch_media(it, d, "https://www.tiktok.com/" if site == "tiktok" else "https://x.com/")
+            job["source"] = ("@" + author) if author else "Vidéo"
+        total = media_duration(src)
+        if not total:
+            raise RuntimeError("Vidéo illisible.")
+        job["before"] = round(total, 1)
+        job["phase"] = "transcribing"
+        tmp = tempfile.mkdtemp(dir=d)
+        words = montage_words(job, src, tmp)
+        if len(words) < 3:
+            raise RuntimeError("Aucune parole détectée dans cette vidéo : rien à couper.")
+        phrases = montage_phrases(words)
+        drop, notes = montage_repeats(job, phrases) if job["repeats"] else (set(), [])
+        job["notes"] = notes
+        fps = video_fps(src)
+        spans = montage_keep(words, phrases, drop, job["level"], job["fillers"], fps, total)
+        if not spans:
+            raise RuntimeError("Rien à garder après le montage.")
+        job["step"] = "Montage de la vidéo…"
+        out = os.path.join(d, "montage.mp4")
+        montage_render(src, out, spans, fps)
+        after = media_duration(out)
+        base = re.sub(r"[^\w-]+", "_", os.path.splitext(job["source"] or "video")[0])[:40].strip("_") or "video"
+        job.update(file=out, filename=f"{base}_monte.mp4", after=round(after, 1), cuts=max(0, len(spans) - 1),
+                   size=os.path.getsize(out), phase="done", step="")
+        print(f"[montage {job['id']}] terminé : {total:.1f}s → {after:.1f}s, {len(spans)} morceaux, "
+              f"{len(drop)} répétitions", flush=True)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        if "Unsupported URL" in msg:
+            msg = "Lien non pris en charge. Importe plutôt la vidéo depuis ta galerie."
+        print(f"[montage {job['id']}] erreur : {msg[:200]}", flush=True)
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        job["finished"] = time.time()
+
+
+@app.post("/api/montage")
+def start_montage():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not GROQ_KEY:
+        return jsonify(error="La clé Groq n'est pas configurée : Kopi ne peut pas écouter la vidéo."), 400
+    cleanup()
+    form = request.form
+    f = request.files.get("file")
+    m = re.search(r"https?://\S+", (form.get("url") or "").strip())
+    if not (f and f.filename) and not m:
+        return jsonify(error="Importe une vidéo ou colle un lien."), 400
+    jid = uuid.uuid4().hex[:12]
+    job = {"id": jid, "platform": "montage", "source": "", "url": "" if f and f.filename else m.group(0),
+           "limit": 0, "sort": "", "lang": (form.get("lang") or "").strip()[:5], "phase": "queued", "items": [],
+           "source_name": "", "error": "", "created": time.time(), "step": "",
+           "level": form.get("level") if form.get("level") in CUT_LEVELS else "normal",
+           "repeats": form.get("repeats") != "0", "fillers": form.get("fillers") != "0",
+           "notes": [], "warn": ""}
+    upload = None
+    if f and f.filename:
+        os.makedirs(os.path.join(BASE, "v_" + jid), exist_ok=True)
+        upload = os.path.join(BASE, "v_" + jid, "input" + (os.path.splitext(f.filename)[1][:10].lower() or ".mp4"))
+        f.save(upload)
+        job["source"] = os.path.basename(f.filename)[:120]
+    with LOCK:
+        JOBS[jid] = job
+    threading.Thread(target=run_montage_job, args=(job, upload), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+@app.get("/api/montage/<jid>")
+def montage_status(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "montage":
+        return jsonify(error="Tâche introuvable (le serveur a peut-être redémarré)."), 404
+    return jsonify({k: j.get(k) for k in ("phase", "error", "step", "before", "after", "cuts", "notes",
+                                          "warn", "source", "size", "filename")})
+
+
+@app.get("/api/montage/<jid>/video")
+def montage_video(jid):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    if not j or j.get("phase") != "done" or not os.path.exists(j.get("file", "")):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance.", 404
+    return send_file(j["file"], as_attachment=request.args.get("dl") == "1", download_name=j["filename"],
+                     mimetype="video/mp4", max_age=3600)
 
 
 @app.get("/api/wa/<jid>/<int:n>")

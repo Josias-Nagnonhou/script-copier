@@ -114,6 +114,11 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 .gph{aspect-ratio:3/4;display:grid;place-items:center;background:var(--soft);color:var(--muted);font-weight:800;max-width:100%}
 .gph.aud{gap:8px;padding:12px;align-content:center}.gph.aud span{font-size:34px;color:var(--ink)}.gph.aud audio{width:100%}
 .gi figcaption{padding:10px 12px;display:grid;gap:2px}
+.omain{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:16px;align-items:start;margin-top:8px}
+.omain video{width:100%;max-height:70vh;border-radius:16px;background:#000}
+.onotes{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-width:0}
+.onotes ol{margin:8px 0 0;padding-left:20px;display:grid;gap:6px;font-size:14px}.onotes li small{color:var(--muted);display:block}
+@media (max-width:720px){.omain{grid-template-columns:1fr}}
 .wdrop{margin-top:10px;padding:14px;position:relative}
 .wgal{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
 .wgal .gi img,.wgal .gi video,.wgal .gph{aspect-ratio:1/1;object-fit:contain}
@@ -236,7 +241,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .modes button:hover{color:var(--ink);background:var(--soft)}
 .modes button:hover svg{transform:translateY(-1px)}
 .modes button.on{background:#111;color:var(--lime);box-shadow:inset 0 0 0 1px rgba(215,255,58,.18)}
-@media (max-width:560px){.modes{width:100%;gap:2px;padding:5px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}.modes button{flex:1 1 0;min-width:0;padding:8px 0 7px;font-size:10.5px;letter-spacing:0;border-radius:12px}.modes button svg{width:21px;height:21px}}
+@media (max-width:560px){.modes{width:100%;gap:2px;padding:5px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr))}.modes button span{text-align:center;line-height:1.15}.modes button{flex:1 1 0;min-width:0;padding:8px 0 7px;font-size:10.5px;letter-spacing:0;border-radius:12px}.modes button svg{width:21px;height:21px}}
 .fdrop{padding:34px 18px;gap:6px}
 .fdrop b{font-size:17px;word-break:break-word}
 .fic{width:48px;height:48px;border-radius:14px;background:var(--ink);color:var(--lime);display:grid;place-items:center;font-size:22px;margin-bottom:6px}
@@ -339,6 +344,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
   <nav class="modes" role="tablist" aria-label="Outils">
     <button role="tab" id="tabAcc" class="on" aria-selected="true" aria-controls="modeAcc" title="Scripts de comptes TikTok et YouTube"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg><span>Scripts</span></button>
     <button role="tab" id="tabCl" aria-selected="false" aria-controls="modeCl" title="Clipping de longues vidéos"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg><span>Clipping</span></button>
+    <button role="tab" id="tabMo" aria-selected="false" aria-controls="modeMo" title="Couper les silences et les répétitions d'une vidéo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M8 5v14M16 5v14M3 12h5M16 12h5"/><path d="m10.5 9.5 3 2.5-3 2.5z"/></svg><span>Montage</span></button>
     <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile" title="Transcrire un fichier audio ou vidéo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M18.5 10.5a6.5 6.5 0 0 1-13 0M12 17v4M8.5 21h7"/></svg><span>Transcrire</span></button>
     <button role="tab" id="tabNet" aria-selected="false" aria-controls="modeNet" title="Retirer la musique de fond et garder la voix"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 9v6"/><path d="m17.5 5.5 1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/></svg><span>Nettoyer</span></button>
     <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl" title="Télécharger les vidéos TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5M5 20.5h14"/></svg><span>TikTok</span></button>
@@ -627,6 +633,47 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <section class="list" id="mBox" hidden>
       <h2 id="mTitle">Médias</h2>
       <div class="gal" id="mGal"></div>
+    </section>
+  </div>
+
+  <div id="modeMo" role="tabpanel" hidden>
+    <h1>Importe une vidéo.<br>Kopi coupe <span>les blancs et les répétitions</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <label class="drop" id="oDrop" for="oFile">
+          <input type="file" id="oFile" accept="video/*,.mp4,.mov,.webm,.mkv">
+          <span class="fic" aria-hidden="true">✂</span>
+          <b id="oName">Choisir une vidéo</b>
+          <small id="oInfo">depuis ta galerie ou ton ordinateur</small>
+        </label>
+        <label for="oUrl" style="margin-top:14px">ou colle un lien (TikTok, X, YouTube…)</label>
+        <input id="oUrl" inputmode="url" placeholder="https://…" autocomplete="off">
+        <label style="margin-top:14px">Rythme</label>
+        <div class="seg" id="oLevel"><button type="button" data-v="leger">Léger</button><button type="button" data-v="normal" class="on">Normal</button><button type="button" data-v="dynamique">Dynamique</button></div>
+        <div class="checks" style="margin-top:2px">
+          <label class="check"><input type="checkbox" id="oRep" checked>Couper les répétitions</label>
+          <label class="check"><input type="checkbox" id="oFill" checked>Couper les « euh »</label>
+        </div>
+        <div class="grid"><div><label for="oLang">Langue parlée</label>
+          <select id="oLang"><option value="">Auto</option><option value="fr" selected>Français</option><option value="en">Anglais</option><option value="ar">Arabe</option><option value="es">Espagnol</option><option value="pt">Portugais</option></select></div></div>
+        <button class="go" id="oGo">Monter la vidéo →</button>
+        <p class="hint" id="oHint">Normal : coupe les blancs mais garde une petite respiration entre les phrases. Kopi ne supprime jamais une information dite une seule fois.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Durée</span>
+        <div class="big"><span id="oAfter">–</span><small id="oBefore"></small></div>
+        <div class="bar" id="oBar"><i id="oFill2"></i></div>
+        <div class="state" id="oState"><span class="empty">Importe une vidéo pour commencer.</span></div>
+        <div class="acts">
+          <button class="btn dl" id="oSave" aria-disabled="true">Enregistrer la vidéo</button>
+          <a class="btn" id="oDl" href="#" aria-disabled="true">Télécharger le MP4</a>
+        </div>
+      </aside>
+    </div>
+    <section class="list" id="oBox" hidden>
+      <h2>Vidéo montée</h2>
+      <div class="omain"><video id="oVid" controls playsinline preload="metadata"></video>
+        <div class="onotes"><b id="oNotesT">Passages répétés retirés</b><ol id="oNotes"></ol><p class="hint" id="oWarn"></p></div></div>
     </section>
   </div>
 
@@ -926,7 +973,7 @@ $('#fbFile').onchange=e=>{if(e.target.files[0])fbSend(e.target.files[0])};
 $('#fbDrop').addEventListener('drop',e=>{if(e.dataTransfer.files[0])fbSend(e.dataTransfer.files[0])});
 fbEnsure();
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],wa:['#tabWa','#modeWa'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
+const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],mo:['#tabMo','#modeMo'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],wa:['#tabWa','#modeWa'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -1059,6 +1106,63 @@ function mWatch(id){
   tick();mTimer=setInterval(tick,2000);
 }
 try{const j=localStorage.getItem('mdJob');if(j)mWatch(j)}catch(e){}
+
+/* ---------- Montage : silences et répétitions ---------- */
+let oTimer=null,oBusy=false,oLevel='normal',oFileObj=null;
+const oHints={leger:"Léger : coupe seulement les longs blancs, le rythme reste posé.",normal:"Normal : coupe les blancs mais garde une petite respiration entre les phrases. Kopi ne supprime jamais une information dite une seule fois.",dynamique:"Dynamique : enchaîne les phrases presque sans pause, style TikTok rapide."};
+function dur(s){s=Math.round(s||0);return s>=60?Math.floor(s/60)+' min '+String(s%60).padStart(2,'0'):s+' s'}
+function oSetBusy(on){oBusy=on;$('#oGo').classList.toggle('busy',on);$('#oGo').textContent=on?'Kopi monte la vidéo…':'Monter la vidéo →';$('#oBar').classList.toggle('live',on)}
+function oErr(m){$('#oState').innerHTML=`<div class="err">${esc(m)}</div>`;oSetBusy(false)}
+$('#oLevel').onclick=e=>{const b=e.target.closest('button');if(!b)return;oLevel=b.dataset.v;$('#oLevel').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));$('#oHint').textContent=oHints[oLevel]};
+$('#oFile').onchange=()=>{const f=$('#oFile').files[0];$('#oName').textContent=f?f.name:'Choisir une vidéo';$('#oInfo').textContent=f?(f.size/1e6).toFixed(1).replace('.',',')+' Mo · prêt':'depuis ta galerie ou ton ordinateur';if(f)$('#oUrl').value=''};
+$('#oUrl').addEventListener('input',()=>{if($('#oUrl').value.trim()&&$('#oFile').files.length){$('#oFile').value='';$('#oFile').onchange()}});
+$('#oGo').onclick=async()=>{
+  if(oBusy)return;
+  const f=$('#oFile').files[0],url=$('#oUrl').value.trim();
+  if(!f&&!url){$('#oFile').click();return}
+  oSetBusy(true);$('#oBox').hidden=true;oFileObj=null;['#oSave','#oDl'].forEach(s=>$(s).setAttribute('aria-disabled','true'));
+  $('#oAfter').textContent='–';$('#oBefore').textContent='';$('#oFill2').style.width='5%';
+  const fd=new FormData();if(f)fd.append('file',f);else fd.append('url',url);
+  fd.append('level',oLevel);fd.append('repeats',$('#oRep').checked?'1':'0');fd.append('fillers',$('#oFill').checked?'1':'0');fd.append('lang',$('#oLang').value);
+  const xhr=new XMLHttpRequest();xhr.open('POST','/api/montage');
+  if(f)xhr.upload.onprogress=e=>{if(e.lengthComputable){$('#oState').textContent=`Envoi de la vidéo · ${Math.round(e.loaded/e.total*100)} %`;$('#oFill2').style.width=Math.max(5,e.loaded/e.total*30)+'%'}};
+  else $('#oState').textContent='Envoi du lien…';
+  xhr.onload=()=>{let d={};try{d=JSON.parse(xhr.responseText)}catch(e){}
+    if(xhr.status!==200)return oErr(d.error||'Erreur '+xhr.status);
+    try{localStorage.setItem('moJob',d.job_id)}catch(e){}oWatch(d.job_id)};
+  xhr.onerror=()=>oErr("Envoi impossible. Vérifie ta connexion et réessaie.");
+  xhr.send(fd);
+};
+function oWatch(id){
+  clearInterval(oTimer);oSetBusy(true);let pct=35;
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/montage/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(oTimer);oSetBusy(false);$('#oState').innerHTML='<span class="empty">Importe une vidéo pour commencer.</span>';try{localStorage.removeItem('moJob')}catch(_){}return}
+    if(d.before)$('#oBefore').textContent=' / '+dur(d.before);
+    if(!['done','error'].includes(d.phase)){pct=Math.min(92,pct+3);$('#oFill2').style.width=pct+'%';$('#oState').textContent=d.step||'Préparation…';return}
+    clearInterval(oTimer);oSetBusy(false);
+    if(d.phase==='error'){oErr(d.error);return}
+    $('#oFill2').style.width='100%';
+    const gain=d.before?Math.round((1-d.after/d.before)*100):0;
+    $('#oAfter').textContent=dur(d.after);
+    $('#oState').textContent=`Prêt · ${gain} % plus courte · ${d.cuts} coupe${d.cuts>1?'s':''}. Disponible 3 heures.`;
+    const src='/api/montage/'+id+'/video';
+    $('#oVid').src=src;$('#oBox').hidden=false;
+    $('#oDl').href=src+'?dl=1';$('#oDl').setAttribute('download',d.filename||'video_monte.mp4');$('#oDl').setAttribute('aria-disabled','false');
+    const n=d.notes||[];$('#oNotesT').textContent=n.length?`${n.length} passage${n.length>1?'s':''} répété${n.length>1?'s':''} retiré${n.length>1?'s':''}`:'Aucune répétition trouvée';
+    $('#oNotes').innerHTML=n.map(x=>`<li>« ${esc(x.text)} »<small>${esc(x.why)}</small></li>`).join('');
+    $('#oWarn').textContent=d.warn||'';
+    if(MOBILE)fetch(src).then(r=>r.blob()).then(b=>{oFileObj=new File([b],d.filename||'video_monte.mp4',{type:'video/mp4'})}).catch(()=>{});
+    $('#oSave').setAttribute('aria-disabled','false');
+    $('#oSave').textContent=IOS?'Enregistrer dans Photos':'Enregistrer la vidéo';
+    $('#oSave').onclick=async()=>{
+      try{if(MOBILE&&oFileObj&&canShareFiles([oFileObj])){await navigator.share({files:[oFileObj]});return}}catch(e){if(e&&e.name==='AbortError')return}
+      dlLink(src+'?dl=1',d.filename);
+    };
+  };
+  tick();oTimer=setInterval(tick,2000);
+}
+try{const j=localStorage.getItem('moJob');if(j)oWatch(j)}catch(e){}
 
 /* ---------- WhatsApp : GIF et stickers ---------- */
 let wTimer=null,wBusy=false,wFit='fit',wJob='',wItems=[],wFiles={};

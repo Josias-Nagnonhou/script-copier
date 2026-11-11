@@ -528,7 +528,7 @@ def cleanup():
     with LOCK:
         for jid in list(JOBS):
             j = JOBS[jid]
-            keep = {"download": 2, "media": 2, "clip": 3}.get(j["platform"], 6) * 3600
+            keep = {"download": 2, "media": 2, "clip": 3, "wa": 2}.get(j["platform"], 6) * 3600
             if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
@@ -1209,6 +1209,195 @@ def job_video(jid, n):
     z = zipfile.ZipFile(j["file"])
     return send_file(z.open(it["arc"]), as_attachment=True, download_name=it["arc"],
                      mimetype="video/mp4", max_age=0)
+
+
+# ------------------------------------------------ WhatsApp : GIF et stickers animés
+WA_STICKER_MAX = 495_000      # WhatsApp refuse les stickers animés de plus de 500 Ko
+WA_STATIC_MAX = 99_000        # et les stickers fixes de plus de 100 Ko
+
+
+def media_duration(path):
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                              "-of", "default=nw=1:nk=1", path], capture_output=True, text=True, timeout=60)
+        return float(out.stdout.strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def ff(args, timeout=300):
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"] + args,
+                       capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0:
+        raise RuntimeError("Conversion impossible : " + (r.stderr.strip().splitlines() or ["erreur ffmpeg"])[-1][:150])
+
+
+def wa_frame(fit):
+    """Cadre 512×512 : vidéo entière avec bords transparents, ou carré recadré au centre."""
+    if fit == "crop":
+        return "crop='min(iw,ih)':'min(iw,ih)',scale=512:512:flags=lanczos,format=rgba"
+    return ("scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba,"
+            "pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000")
+
+
+def wa_gif(src, out, start, dur):
+    """Vidéo courte sans son : WhatsApp la lit en boucle comme un GIF."""
+    ff(["-ss", f"{start:.2f}", "-t", f"{dur:.2f}", "-i", src, "-an",
+        "-vf", "scale=720:720:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,fps=30",
+        "-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
+        "-crf", "23", "-movflags", "+faststart", out])
+
+
+def wa_sticker(src, out, start, dur, fit):
+    """Sticker animé WebP 512×512, en boucle, sous 500 Ko (on baisse la qualité puis la durée si besoin)."""
+    tries = [(15, 75), (15, 60), (12, 50), (12, 40), (10, 35), (10, 25), (8, 20)]
+    d = dur
+    while True:
+        for fps, q in tries:
+            ff(["-ss", f"{start:.2f}", "-t", f"{d:.2f}", "-i", src, "-an",
+                "-vf", f"fps={fps},{wa_frame(fit)}", "-c:v", "libwebp_anim", "-lossless", "0",
+                "-q:v", str(q), "-compression_level", "6", "-loop", "0", out])
+            size = os.path.getsize(out)
+            if size <= WA_STICKER_MAX:
+                return d, size
+        if d <= 1.5:
+            raise RuntimeError("Vidéo trop chargée pour tenir dans un sticker (500 Ko max). Choisis un passage plus court.")
+        d = max(1.5, round(d * 0.7, 1))
+
+
+def wa_still(src, out, fit):
+    """Photo → sticker fixe WebP 512×512 sous 100 Ko."""
+    for q in (90, 80, 70, 60, 50, 40, 30):
+        ff(["-i", src, "-vf", wa_frame(fit), "-frames:v", "1", "-c:v", "libwebp", "-q:v", str(q), out])
+        if os.path.getsize(out) <= WA_STATIC_MAX:
+            return os.path.getsize(out)
+    raise RuntimeError("Image trop lourde pour un sticker.")
+
+
+def run_wa_job(job, upload=None):
+    print(f"[whatsapp {job['id']}] {job['url'] or job['source']}", flush=True)
+    d = os.path.join(BASE, "w_" + job["id"])
+    os.makedirs(d, exist_ok=True)
+    job["dir"] = d
+    try:
+        job["phase"] = "listing"
+        if upload:
+            ext = os.path.splitext(upload)[1].lower()
+            kind = "photo" if ext in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".avif") else "video"
+            sources, author = [{"kind": kind, "path": upload}], ""
+        else:
+            site, author, text, media = extract_post(job["url"])
+            media = [m for m in media if m["kind"] in ("video", "ytdlp")] or [m for m in media if m["kind"] == "photo"]
+            if not media:
+                raise RuntimeError("Ce post ne contient ni vidéo ni GIF.")
+            referer = "https://www.tiktok.com/" if site == "tiktok" else "https://x.com/"
+            sources = []
+            for i, m in enumerate(media[:4]):
+                it = {"n": i + 1, "url": m["url"], "kind": m["kind"]}
+                job["step"] = f"Téléchargement {i + 1}/{min(len(media), 4)}…"
+                sources.append({"kind": it["kind"] if it["kind"] != "ytdlp" else "video",
+                                "path": fetch_media(it, d, referer)})
+        job["source_name"] = ("@" + author) if author else "Ta vidéo"
+        base = re.sub(r"[^\w-]+", "_", author or "kopi")[:30] or "kopi"
+        start, want = job["start"], job["dur"]
+        n = 0
+        job["phase"] = "transcribing"
+        for k, s in enumerate(sources, 1):
+            tag = f" {k}" if len(sources) > 1 else ""
+            if s["kind"] == "photo":
+                n += 1
+                it = {"n": n, "kind": "sticker", "title": f"Sticker{tag}", "status": "working", "msg": "", "text": "",
+                      "name": f"{base}_sticker{k}.webp", "size": 0, "secs": 0}
+                job["items"].append(it)
+                job["step"] = "Création du sticker…"
+                out = os.path.join(d, f"s{k}.webp")
+                it.update(size=wa_still(s["path"], out, job["fit"]), path=out, status="done")
+                continue
+            total = media_duration(s["path"]) or want
+            st = min(start, max(0.0, total - 0.5))
+            dur = max(0.5, min(want, total - st))
+            n += 1
+            g = {"n": n, "kind": "gif", "title": f"GIF{tag}", "status": "working", "msg": "", "text": "",
+                 "name": f"{base}_gif{k}.mp4", "size": 0, "secs": round(dur, 1)}
+            n += 1
+            t = {"n": n, "kind": "sticker", "title": f"Sticker animé{tag}", "status": "pending", "msg": "", "text": "",
+                 "name": f"{base}_sticker{k}.webp", "size": 0, "secs": 0}
+            job["items"] += [g, t]
+            try:
+                job["step"] = "Création du GIF…"
+                out = os.path.join(d, f"g{k}.mp4")
+                wa_gif(s["path"], out, st, dur)
+                g.update(path=out, size=os.path.getsize(out), status="done")
+            except Exception as e:
+                g.update(status="error", msg=str(e)[:200])
+            try:
+                t["status"] = "working"
+                job["step"] = "Création du sticker animé…"
+                out = os.path.join(d, f"s{k}.webp")
+                secs, size = wa_sticker(s["path"], out, st, dur, job["fit"])
+                t.update(path=out, size=size, secs=round(secs, 1), status="done",
+                         msg="" if secs >= dur - 0.05 else f"raccourci à {secs:.1f} s pour tenir sous 500 Ko")
+            except Exception as e:
+                t.update(status="error", msg=str(e)[:200])
+        if not any(i["status"] == "done" for i in job["items"]):
+            raise RuntimeError(job["items"][0]["msg"] if job["items"] else "Rien à convertir.")
+        job["phase"] = "done"
+        job["step"] = ""
+        print(f"[whatsapp {job['id']}] terminé : {sum(i['status'] == 'done' for i in job['items'])} fichiers", flush=True)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        if "Unsupported URL" in msg:
+            msg = "Lien non pris en charge. Colle un lien de post X/Twitter ou TikTok."
+        print(f"[whatsapp {job['id']}] erreur : {msg[:200]}", flush=True)
+        job["phase"], job["error"] = "error", msg[:300]
+    finally:
+        job["finished"] = time.time()
+
+
+@app.post("/api/wa")
+def start_wa():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    cleanup()
+    form = request.form if request.files or request.form else (request.get_json(silent=True) or {})
+    f = request.files.get("file")
+    url = (form.get("url") or "").strip()
+    m = re.search(r"https?://\S+", url)
+    if not f and not m:
+        return jsonify(error="Colle le lien du post (il commence par https://) ou importe une vidéo."), 400
+
+    def num(k, dflt, lo, hi):
+        try:
+            return max(lo, min(hi, float(form.get(k) or dflt)))
+        except ValueError:
+            return dflt
+    jid = uuid.uuid4().hex[:12]
+    job = {"id": jid, "platform": "wa", "source": "", "url": m.group(0) if m and not f else "",
+           "limit": 0, "sort": "", "lang": "", "phase": "queued", "items": [], "source_name": "",
+           "error": "", "created": time.time(), "start": num("start", 0, 0, 3600), "dur": num("dur", 6, 1, 10),
+           "fit": "crop" if form.get("fit") == "crop" else "fit", "step": ""}
+    upload = None
+    if f and f.filename:
+        os.makedirs(os.path.join(BASE, "w_" + jid), exist_ok=True)
+        upload = os.path.join(BASE, "w_" + jid, "input" + (os.path.splitext(f.filename)[1][:10].lower() or ".mp4"))
+        f.save(upload)
+        job["source"] = os.path.basename(f.filename)[:120]
+    with LOCK:
+        JOBS[jid] = job
+    threading.Thread(target=run_wa_job, args=(job, upload), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+@app.get("/api/wa/<jid>/<int:n>")
+def wa_file(jid, n):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid)
+    it = next((i for i in (j or {}).get("items", []) if i["n"] == n and i["status"] == "done"), None)
+    if not it or not os.path.exists(it.get("path", "")):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Relance.", 404
+    return send_file(it["path"], as_attachment=request.args.get("dl") == "1", download_name=it["name"],
+                     mimetype="image/webp" if it["kind"] == "sticker" else "video/mp4", max_age=3600)
 
 
 # ------------------------------------------------ traduction

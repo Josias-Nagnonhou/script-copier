@@ -125,7 +125,7 @@ textarea#tText:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
 .wgal .gi img{background:repeating-conic-gradient(var(--soft) 0 25%,var(--card) 0 50%) 0 0/20px 20px}
 .wgal .gi video{background:#000}
 .wacts{display:grid;gap:6px;margin-top:8px}.wacts .btn{padding:10px;font-size:14px}
-.wsteps{margin:10px 0 0;font-size:14px;font-weight:500}
+.wsteps{margin:6px 0 10px;font-size:14px;font-weight:500}.wsub{display:block;margin-top:10px;font-size:14px}
 .gi figcaption b{font-size:14px}.gi figcaption small{color:var(--muted);font-size:12px}
 .gsave{justify-self:start;margin-top:6px;border:0;cursor:pointer;font-family:var(--body)}
 .gview{display:block;border:0;padding:0;margin:0;background:none;cursor:zoom-in;width:100%}
@@ -701,12 +701,19 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
         <span class="lbl">Ajouter à WhatsApp</span>
         <div class="bar" id="wBar"><i id="wFill"></i></div>
         <div class="state" id="wState"><span class="empty">Colle un lien pour commencer.</span></div>
+        <b class="wsub">Pour le GIF</b>
         <ol class="steps wsteps">
-          <li>Touche <b>« Envoyer sur WhatsApp »</b>.</li>
-          <li>Choisis WhatsApp, puis ta discussion <b>« Moi »</b> (message à toi-même).</li>
-          <li>Dans la discussion, appuie longtemps dessus → <b>Ajouter aux favoris</b> ⭐.</li>
+          <li>Touche <b>« Enregistrer »</b> sous le GIF.</li>
+          <li>Dans WhatsApp : trombone 📎 → <b>Galerie</b> → choisis la vidéo.</li>
+          <li>En haut à droite, touche l'icône caméra pour qu'elle devienne <b>GIF</b>, puis envoie.</li>
         </ol>
-        <p class="hint">Il est ensuite dans tes GIF ou tes stickers, utilisable partout.</p>
+        <b class="wsub">Pour le sticker animé</b>
+        <ol class="steps wsteps">
+          <li>Touche <b>« Enregistrer »</b> sous le sticker (garde aussi le GIF).</li>
+          <li>Installe l'appli gratuite <b>Sticker.ly</b>, touche <b>+</b> → <b>Animé</b> et choisis le GIF enregistré.</li>
+          <li>Touche <b>Ajouter à WhatsApp</b> (il faut 3 stickers minimum dans un paquet).</li>
+        </ol>
+        <p class="hint">WhatsApp n'accepte les stickers animés de ton téléphone que par une appli de stickers : aucun site ne peut les ajouter directement.</p>
       </aside>
     </div>
     <section class="list" id="wBox" hidden>
@@ -1192,7 +1199,7 @@ function wTile(id,i){
   if(i.status!=='done')return `<figure class="gi gi-wait"><div class="gph">${i.status==='error'?'Échec':'…'}</div><figcaption><b>${esc(i.title)}</b><small>${esc(i.msg)||(i.status==='working'?'en cours…':'en attente')}</small></figcaption></figure>`;
   const view=i.kind==='gif'?`<video src="${src}" autoplay muted loop playsinline></video>`:`<img src="${src}" alt="${esc(i.title)}">`;
   const meta=[ko(i.size),i.secs?String(i.secs).replace('.',',')+' s':'',i.msg].filter(Boolean).join(' · ');
-  return `<figure class="gi">${view}<figcaption><b>${esc(i.title)}</b><small>${esc(meta)}</small><div class="wacts"><button type="button" class="btn dl wshare" data-n="${i.n}">Envoyer sur WhatsApp</button><button type="button" class="btn wdl" data-n="${i.n}">Télécharger</button></div></figcaption></figure>`;
+  return `<figure class="gi">${view}<figcaption><b>${esc(i.title)}</b><small>${esc(meta)}</small><div class="wacts"><button type="button" class="btn dl wshare" data-n="${i.n}">${IOS?'Enregistrer dans Photos':'Enregistrer'}</button></div></figcaption></figure>`;
 }
 async function wGet(id,i){
   if(wFiles[i.n])return wFiles[i.n];
@@ -1219,12 +1226,9 @@ try{const j=localStorage.getItem('waJob');if(j)wWatch(j)}catch(e){}
 $('#wGal').onclick=async e=>{
   const sh=e.target.closest('.wshare'),dl=e.target.closest('.wdl');
   const b=sh||dl;if(!b)return;const it=wItems.find(x=>x.n===+b.dataset.n);if(!it)return;
-  if(dl){dlLink(`/api/wa/${wJob}/${it.n}?dl=1`,it.name);return}
-  try{const f=await wGet(wJob,it);
-    if(canShareFiles([f])){await navigator.share({files:[f]});return}
-  }catch(err){if(err&&err.name==='AbortError')return}
+  if(IOS){try{const f=await wGet(wJob,it);if(canShareFiles([f])){await navigator.share({files:[f]});return}}catch(err){if(err&&err.name==='AbortError')return}}
   dlLink(`/api/wa/${wJob}/${it.n}?dl=1`,it.name);
-  $('#wState').textContent=MOBILE?"Ton téléphone ne permet pas l'envoi direct : le fichier est téléchargé, envoie-le depuis WhatsApp (trombone → Galerie / Document).":"Fichier téléchargé. Sur ordinateur, glisse-le dans une discussion WhatsApp Web : le .webp part en sticker.";
+  $('#wState').textContent=MOBILE?"Enregistré dans tes téléchargements (visible dans ta galerie). Suis les étapes ci-dessus.":"Fichier téléchargé. Sur WhatsApp Web, glisse le .webp dans une discussion : il part directement en sticker.";
 };
 
 $('#mGal').onclick=e=>{

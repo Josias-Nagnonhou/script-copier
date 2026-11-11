@@ -528,7 +528,7 @@ def cleanup():
     with LOCK:
         for jid in list(JOBS):
             j = JOBS[jid]
-            keep = {"download": 2, "media": 2, "clip": 3, "montage": 3}.get(j["platform"], 6) * 3600
+            keep = {"download": 2, "media": 2, "clip": 3, "montage": 3, "thumb": 12}.get(j["platform"], 6) * 3600
             if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
@@ -1225,6 +1225,392 @@ def ff(args, timeout=300):
                        capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0:
         raise RuntimeError("Conversion impossible : " + (r.stderr.strip().splitlines() or ["erreur ffmpeg"])[-1][:150])
+
+
+# ------------------------------------------------ Miniatures
+import base64
+import io
+import thumb as TH
+from PIL import Image
+
+VISION_MODELS = [m.strip() for m in os.environ.get(
+    "GROQ_VISION_MODELS", "qwen/qwen3.8-27b,meta-llama/llama-4-scout-17b-16e-instruct").split(",") if m.strip()]
+
+
+def cf_ready():
+    return bool(CF_TOKEN and re.fullmatch(r"[0-9a-f]{32}", CF_ACCOUNT or ""))
+
+
+def vision_json(img_path, prompt):
+    """Fait « regarder » une image à l'IA (Groq, puis Gemini) et renvoie un JSON."""
+    im = Image.open(img_path).convert("RGB")
+    im.thumbnail((1024, 1024))
+    b = io.BytesIO()
+    im.save(b, "JPEG", quality=88)
+    b64 = base64.b64encode(b.getvalue()).decode()
+    for model in VISION_MODELS:
+        try:
+            r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                              headers={"Authorization": f"Bearer {GROQ_KEY}"},
+                              json={"model": model, "temperature": 0.3, "max_tokens": 1500,
+                                    "response_format": {"type": "json_object"},
+                                    "messages": [{"role": "user", "content": [
+                                        {"type": "text", "text": prompt},
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}]},
+                              timeout=90)
+            if r.status_code == 200:
+                return parse_json_obj(r.json()["choices"][0]["message"]["content"])
+            print(f"[miniature] vision {model} : {r.status_code} {r.text[:120]}", flush=True)
+        except Exception as e:
+            print(f"[miniature] vision {model} : {str(e)[:120]}", flush=True)
+    if GEMINI_KEY:
+        for model in GEMINI_TEXT_MODELS[:2]:
+            try:
+                r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                                  headers={"x-goog-api-key": GEMINI_KEY}, timeout=120,
+                                  json={"contents": [{"role": "user", "parts": [
+                                      {"text": prompt}, {"inline_data": {"mime_type": "image/jpeg", "data": b64}}]}],
+                                        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3}})
+                if r.status_code == 200:
+                    parts = r.json()["candidates"][0]["content"]["parts"]
+                    return parse_json_obj("".join(p.get("text", "") for p in parts if not p.get("thought")))
+            except Exception as e:
+                print(f"[miniature] vision Gemini : {str(e)[:120]}", flush=True)
+    return {}
+
+
+def thumb_analyse_ref(path):
+    keys = ", ".join(TH.STYLES)
+    return vision_json(path, (
+        "Tu es directeur artistique YouTube. Analyse cette miniature et décris COMMENT elle est construite pour que "
+        "je puisse en créer une nouvelle dans le même esprit (sans la copier). Réponds en JSON : "
+        '{"scene_en": "description en anglais du décor, du cadrage, de la lumière, des couleurs, des objets et de '
+        'la composition, SANS décrire le texte ni l\'identité des personnes (60 mots max)", '
+        f'"style": "le plus proche parmi : {keys}", '
+        '"emotion": "choc|colere|peur|serieux|joie|mystere|triste|confiant", '
+        '"position_texte": "left|right|top|bottom", "couleur_texte": "#RRGGBB", "couleur_accent": "#RRGGBB", '
+        '"police": "impact|bebas|montserrat|archivo|gothic|unbounded|cinzel|serif|poppins|rond", '
+        '"fleche": true/false, "cercle": true/false, "nb_mots_texte": 3, '
+        '"pourquoi_ca_marche": "1 phrase en français"}'))
+
+
+def thumb_plan(job, analysis):
+    o = job["opts"]
+    n = job["n"]
+    user_text = o.get("texte", "").strip()
+    prompt = (
+        "Tu crées des miniatures YouTube virales pour un public africain francophone.\n"
+        f"Niche : {o.get('niche') or 'non précisée'}\nSujet de la vidéo : {o.get('sujet') or user_text or 'non précisé'}\n"
+        f"Style visuel : {TH.STYLES.get(job['style'], {}).get('label', job['style'])}\n"
+        + (f"Analyse de la miniature modèle : {json.dumps(analysis, ensure_ascii=False)}\n" if analysis else "")
+        + f"\nPropose {n} variantes DIFFÉRENTES (angle, décor, objets, cadrage) qui donnent très envie de cliquer.\n"
+        "Pour chaque variante :\n"
+        "- scene_en : description en ANGLAIS de la scène photo (décor, objets symboliques, lumière, cadrage, ce que fait "
+        "le personnage), 45 mots max, sans aucun texte écrit dans l'image ;\n"
+        + (f"- texte : EXACTEMENT « {user_text} » (ne change rien, garde accents et ponctuation) ;\n" if user_text else
+           "- texte : 2 à 5 mots en français, percutants, en majuscules naturelles, qui créent la curiosité (pas un "
+           "résumé, pas de point final) ;\n")
+        + "- mot_fort : le ou les 1-2 mots du texte à mettre en couleur (copiés tels quels) ;\n"
+        + ("- badge : " + (f"EXACTEMENT « {o['badge']} »" if o.get("badge") else
+                          "2-3 mots courts optionnels (ex. « HISTOIRE VRAIE », « PARTIE 2 ») ou chaîne vide") + ".\n")
+        + 'Réponds en JSON : {"variantes": [{"scene_en": "", "texte": "", "mot_fort": "", "badge": ""}]}')
+    try:
+        out = parse_json_obj(groq_chat([{"role": "user", "content": prompt}], max_tokens=2500, json_mode=True,
+                                       tag="miniature"))
+        vs = [v for v in out.get("variantes") or [] if isinstance(v, dict) and v.get("scene_en")]
+    except Exception as e:
+        print(f"[miniature {job['id']}] plan IA impossible : {str(e)[:120]}", flush=True)
+        vs = []
+    base_scene = (analysis or {}).get("scene_en") or f"scene about {o.get('sujet') or o.get('niche') or 'a dramatic story'}"
+    while len(vs) < n:
+        vs.append({"scene_en": base_scene, "texte": user_text, "mot_fort": o.get("mot_fort", ""), "badge": o.get("badge", "")})
+    for v in vs:
+        if user_text:
+            v["texte"] = user_text
+        if o.get("mot_fort"):
+            v["mot_fort"] = o["mot_fort"]
+        if o.get("badge"):
+            v["badge"] = o["badge"]
+        if o.get("sans_texte"):
+            v["texte"], v["badge"] = "", ""
+    return vs[:n]
+
+
+def thumb_spec(job, v, analysis):
+    o, a = job["opts"], analysis or {}
+    st = TH.STYLES.get(job["style"], TH.STYLES["viral"])
+    pick = lambda key, ak, default: o.get(key) if o.get(key) not in (None, "", "auto") else (a.get(ak) or default)
+    pol = pick("police", "police", st["font"])
+    return {"texte": v.get("texte", ""), "mot_fort": v.get("mot_fort", ""), "badge": v.get("badge", ""),
+            "position": job["pos"], "police": pol if pol in TH.FONTS else st["font"],
+            "couleur": pick("couleur", "couleur_texte", st["color"]), "accent": pick("accent", "couleur_accent", st["accent"]),
+            "fleche": o.get("fleche") == "1" or (o.get("fleche") == "auto" and bool(a.get("fleche"))),
+            "cercle": o.get("cercle") == "1" or (o.get("cercle") == "auto" and bool(a.get("cercle"))),
+            "style_mot": o.get("style_mot") or "couleur", "taille": float(o.get("taille") or 1),
+            "contraste": True, "vignette": True}
+
+
+def thumb_render_one(job, k, new_seed=False):
+    v = job["variants"][k]
+    if new_seed or "seed" not in v:
+        v["seed"] = random.randint(1, 2_000_000_000)
+    prompt = TH.build_prompt(v["scene_en"], job["style"], job["emotion"], job["fmt"], bool(job["ref"]),
+                             len(job["photos"]), job["pos"] if v["spec"].get("texte") else "none",
+                             african=job["opts"].get("africain") != "0")
+    v["prompt"] = prompt
+    refs = ([job["ref"]] if job["ref"] else []) + job["photos"]
+    img = TH.generate(prompt, job["fmt"], CF_ACCOUNT, CF_TOKEN, refs, job["quality"], v["seed"],
+                      log=lambda m: print(m, flush=True))
+    raw = os.path.join(job["dir"], f"raw_{k}.jpg")
+    TH.fit_cover(img, TH.FORMATS[job["fmt"]]).save(raw, "JPEG", quality=95)
+    v["raw"] = raw
+    thumb_compose_one(job, k)
+
+
+def thumb_compose_one(job, k):
+    v = job["variants"][k]
+    out = TH.compose(Image.open(v["raw"]).convert("RGB"), v["spec"], job["fmt"])
+    v["ver"] = v.get("ver", 0) + 1
+    v["file"] = os.path.join(job["dir"], f"miniature_{k + 1}.jpg")
+    TH.save(out, v["file"])
+    v["status"] = "done"
+
+
+def run_thumb_job(job):
+    print(f"[miniature {job['id']}] {job['opts'].get('niche')} · {job['style']} · {job['fmt']} · "
+          f"{job['n']} variante(s) · modèle={bool(job['ref'])} · photos={len(job['photos'])}", flush=True)
+    try:
+        job["phase"] = "transcribing"
+        analysis = {}
+        if job["ref"]:
+            job["step"] = "Analyse de la miniature modèle…"
+            analysis = thumb_analyse_ref(job["ref"]) or {}
+            job["analysis"] = analysis
+            if job["style"] == "auto" and analysis.get("style") in TH.STYLES:
+                job["style"] = analysis["style"]
+            if job["emotion"] == "auto" and analysis.get("emotion") in TH.EMOTIONS:
+                job["emotion"] = analysis["emotion"]
+            if job["pos"] == "auto" and analysis.get("position_texte") in ("left", "right", "top", "bottom") \
+                    and job["fmt"] == "16:9":
+                job["pos"] = analysis["position_texte"]
+        if job["style"] == "auto":
+            job["style"] = {"Football": "foot", "Spiritualité chrétienne": "spirituel", "Islam": "spirituel",
+                            "Mystère / ésotérisme": "mystere", "Business / argent": "argent", "Histoire": "histoire",
+                            "Faits divers / enquête": "documentaire", "Motivation": "viral"}.get(job["opts"].get("niche"), "viral")
+        if job["emotion"] == "auto":
+            job["emotion"] = {"mystere": "mystere", "documentaire": "serieux", "spirituel": "serieux",
+                              "argent": "confiant", "histoire": "serieux"}.get(job["style"], "choc")
+        if job["pos"] == "auto":
+            job["pos"] = "left" if job["fmt"] == "16:9" else ("top" if job["fmt"] == "9:16" else "bottom")
+        job["step"] = "Idées de miniatures…"
+        plan = thumb_plan(job, analysis)
+        job["variants"] = [{"scene_en": v["scene_en"], "status": "pending", "error": "",
+                            "spec": thumb_spec(job, v, analysis)} for v in plan]
+        for k in range(len(job["variants"])):
+            job["step"] = f"Création de la miniature {k + 1} sur {len(job['variants'])}…"
+            job["pct"] = round(10 + 85 * k / len(job["variants"]))
+            try:
+                thumb_render_one(job, k)
+            except Exception as e:
+                job["variants"][k].update(status="error", error=str(e)[:200])
+                print(f"[miniature {job['id']}] variante {k + 1} : {str(e)[:150]}", flush=True)
+                if "Quota" in str(e) or "refuse" in str(e):
+                    for v in job["variants"][k + 1:]:
+                        v.update(status="error", error=str(e)[:200])
+                    break
+        if not any(v["status"] == "done" for v in job["variants"]):
+            raise RuntimeError(next((v["error"] for v in job["variants"] if v["error"]), "Aucune miniature créée."))
+        job["phase"], job["pct"], job["step"] = "done", 100, ""
+        print(f"[miniature {job['id']}] terminé : {sum(v['status'] == 'done' for v in job['variants'])} miniature(s)", flush=True)
+    except Exception as e:
+        job["phase"], job["error"] = "error", str(e)[:300]
+        print(f"[miniature {job['id']}] erreur : {str(e)[:200]}", flush=True)
+    finally:
+        job["finished"] = time.time()
+
+
+def _save_img_upload(f, d, name):
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".avif", ".gif"):
+        raise ValueError("Image non reconnue : utilise un JPG, PNG ou WEBP.")
+    p = os.path.join(d, name + ext)
+    f.save(p)
+    if ext in (".heic", ".avif", ".gif", ".webp"):
+        p = to_jpeg(p) if ext == ".heic" else _to_jpg(p)
+    return p
+
+
+def _to_jpg(p):
+    out = os.path.splitext(p)[0] + ".jpg"
+    Image.open(p).convert("RGB").save(out, "JPEG", quality=94)
+    return out
+
+
+@app.get("/api/thumb/status")
+def thumb_status():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    return jsonify(cf=cf_ready(), token=bool(CF_TOKEN), styles=[[k, v["label"]] for k, v in TH.STYLES.items()],
+                   niches=TH.NICHES)
+
+
+@app.post("/api/cf-account")
+def set_cf_account():
+    """Account ID Cloudflare collé dans Kopi (gardé dans le navigateur et renvoyé après un redémarrage)."""
+    global CF_ACCOUNT
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not CF_TOKEN:
+        return jsonify(error="Le jeton Cloudflare n'est pas dans Render (variable « jeton »)."), 400
+    acc = re.search(r"[0-9a-fA-F]{32}", (request.get_json(force=True, silent=True) or {}).get("account") or "")
+    if not acc:
+        return jsonify(error="Ce n'est pas un Account ID : il fait 32 caractères (chiffres et lettres de a à f)."), 400
+    acc = acc.group(0).lower()
+    try:
+        r = requests.get(f"https://api.cloudflare.com/client/v4/accounts/{acc}/ai/models/search?per_page=1",
+                         headers={"Authorization": f"Bearer {CF_TOKEN}"}, timeout=20)
+    except requests.RequestException:
+        return jsonify(error="Cloudflare ne répond pas, réessaie."), 502
+    if r.status_code != 200:
+        return jsonify(error="Cloudflare refuse cet Account ID avec ton jeton. Vérifie que tu as copié celui du même "
+                             "compte."), 400
+    CF_ACCOUNT = acc
+    EB.DOWN.pop("cloudflare", None)
+    print("Cloudflare : Account ID ajouté depuis Kopi ✓", flush=True)
+    return jsonify(ok=True)
+
+
+@app.post("/api/thumb")
+def start_thumb():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not cf_ready():
+        return jsonify(error="Cloudflare n'est pas encore branché : colle ton Account ID dans le cadre en haut.",
+                       need_cf=True), 400
+    if any(j["platform"] == "thumb" and not j.get("finished") for j in JOBS.values()):
+        return jsonify(error="Une création de miniatures est déjà en cours. Attends qu'elle se termine."), 409
+    cleanup()
+    fo = request.form
+    jid = uuid.uuid4().hex[:12]
+    d = os.path.join(BASE, "t_" + jid)
+    os.makedirs(d, exist_ok=True)
+    try:
+        ref = request.files.get("ref")
+        ref_p = _save_img_upload(ref, d, "modele") if ref and ref.filename else None
+        photos = [_save_img_upload(f, d, f"perso{i}") for i, f in enumerate(request.files.getlist("photo")[:2])
+                  if f and f.filename]
+    except ValueError as e:
+        shutil.rmtree(d, ignore_errors=True)
+        return jsonify(error=str(e)), 400
+    opts = {k: (fo.get(k) or "").strip()[:300] for k in (
+        "niche", "sujet", "texte", "mot_fort", "badge", "police", "couleur", "accent", "fleche", "cercle",
+        "style_mot", "taille", "africain", "sans_texte")}
+    if not (ref_p or opts["sujet"] or opts["texte"]):
+        shutil.rmtree(d, ignore_errors=True)
+        return jsonify(error="Donne au moins une miniature modèle, un sujet ou le texte de la miniature."), 400
+    fmt = fo.get("format") if fo.get("format") in TH.FORMATS else "16:9"
+    try:
+        n = max(1, min(4, int(fo.get("n") or 2)))
+    except ValueError:
+        n = 2
+    job = {"id": jid, "platform": "thumb", "source": opts["sujet"] or opts["texte"] or "Miniature",
+           "source_name": opts["sujet"] or opts["texte"] or "Miniature", "url": "", "limit": 0, "sort": "",
+           "lang": "", "phase": "queued", "items": [], "error": "", "created": time.time(), "step": "Préparation…",
+           "pct": 3, "dir": d, "ref": ref_p, "photos": photos, "opts": opts, "fmt": fmt, "n": n,
+           "style": fo.get("style") if fo.get("style") in TH.STYLES else "auto",
+           "emotion": fo.get("emotion") if fo.get("emotion") in TH.EMOTIONS else "auto",
+           "pos": fo.get("position") if fo.get("position") in ("left", "right", "top", "bottom") else "auto",
+           "quality": "qualite" if fo.get("qualite") == "qualite" else "rapide", "variants": []}
+    with LOCK:
+        JOBS[jid] = job
+    threading.Thread(target=run_thumb_job, args=(job,), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+def _thumb_job(jid):
+    j = JOBS.get(jid)
+    return j if j and j.get("platform") == "thumb" else None
+
+
+@app.get("/api/thumb/<jid>")
+def thumb_job_status(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = _thumb_job(jid)
+    if not j:
+        return jsonify(error="Création introuvable (le serveur a peut-être redémarré)."), 404
+    return jsonify(phase=j["phase"], error=j["error"], step=j.get("step"), pct=j.get("pct", 0), fmt=j["fmt"],
+                   style=j["style"], analysis=(j.get("analysis") or {}).get("pourquoi_ca_marche", ""),
+                   variants=[{"status": v["status"], "error": v.get("error", ""), "ver": v.get("ver", 0),
+                              "spec": v["spec"], "busy": v.get("busy", False)} for v in j.get("variants", [])])
+
+
+@app.get("/api/thumb/<jid>/<int:k>")
+def thumb_file(jid, k):
+    if not authed():
+        return "Non connecté", 401
+    j = _thumb_job(jid)
+    v = (j or {}).get("variants", [])[k] if j and 0 <= k < len(j.get("variants", [])) else None
+    path = v and (v.get("raw") if request.args.get("raw") == "1" else v.get("file"))
+    if not path or not os.path.exists(path):
+        return "Image introuvable (le serveur a peut-être redémarré).", 404
+    name = f"miniature_{k + 1}{'_sans_texte' if request.args.get('raw') == '1' else ''}.jpg"
+    return send_file(path, mimetype="image/jpeg", as_attachment=request.args.get("dl") == "1", download_name=name,
+                     max_age=0)
+
+
+@app.post("/api/thumb/<jid>/<int:k>/edit")
+def thumb_edit(jid, k):
+    """Change le texte, les couleurs, la police… sans refaire l'image (instantané et gratuit)."""
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = _thumb_job(jid)
+    if not j or not (0 <= k < len(j["variants"])) or not j["variants"][k].get("raw"):
+        return jsonify(error="Miniature introuvable."), 404
+    d = request.get_json(force=True, silent=True) or {}
+    sp = j["variants"][k]["spec"]
+    for key in ("texte", "mot_fort", "badge", "position", "police", "couleur", "accent", "style_mot"):
+        if key in d:
+            sp[key] = str(d[key])[:200]
+    for key in ("fleche", "cercle"):
+        if key in d:
+            sp[key] = bool(d[key])
+    if "taille" in d:
+        try:
+            sp["taille"] = max(.6, min(1.5, float(d["taille"])))
+        except (TypeError, ValueError):
+            pass
+    try:
+        thumb_compose_one(j, k)
+    except Exception as e:
+        return jsonify(error=f"Retouche impossible : {str(e)[:150]}"), 500
+    return jsonify(ok=True, ver=j["variants"][k]["ver"])
+
+
+@app.post("/api/thumb/<jid>/<int:k>/redo")
+def thumb_redo(jid, k):
+    """Nouvelle image pour cette variante (même idée, autre rendu)."""
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = _thumb_job(jid)
+    if not j or not (0 <= k < len(j["variants"])):
+        return jsonify(error="Miniature introuvable."), 404
+    v = j["variants"][k]
+    if v.get("busy"):
+        return jsonify(ok=True)
+    v["busy"] = True
+
+    def go():
+        try:
+            thumb_render_one(j, k, new_seed=True)
+            v["error"] = ""
+        except Exception as e:
+            v["error"] = str(e)[:200]
+        finally:
+            v["busy"] = False
+            j["finished"] = time.time()
+    threading.Thread(target=go, daemon=True).start()
+    return jsonify(ok=True)
 
 
 # ------------------------------------------------ Montage auto : silences et répétitions

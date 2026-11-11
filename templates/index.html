@@ -295,6 +295,32 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .fbst{font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:#fde8e6;color:#b42318}
 .fbst.ok{background:#e6f6ec;color:#167a3c}
 #fbConn.ok .steps,#fbConn.ok .hint{display:none}
+.thgrid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+@media (max-width:860px){.thgrid{grid-template-columns:1fr}}
+.thtwo{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media (max-width:560px){.thtwo{grid-template-columns:1fr}}
+.thdrop{position:relative;min-height:150px;padding:10px;overflow:hidden}
+.thdrop img{width:100%;max-height:170px;object-fit:contain;border-radius:10px}
+.thph{display:grid;gap:2px}.thphs{display:flex;gap:8px;justify-content:center}.thphs img{width:84px;height:84px;object-fit:cover;border-radius:12px}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chips button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:7px 13px;font:700 13px var(--body);cursor:pointer}
+.chips button.on{background:var(--ink);color:var(--on-ink);border-color:var(--ink)}
+.thseg{display:flex;flex-wrap:wrap}.thseg button{padding:8px 13px;font-size:13px}
+.thadv{margin-top:12px;border:1px solid var(--line);border-radius:14px;padding:10px 14px}
+.thadv summary{cursor:pointer;font-weight:800}.thadv[open] summary{margin-bottom:10px}
+.thcol{display:flex;gap:10px;align-items:center}.thcol input[type=color]{width:46px;height:36px;border:1px solid var(--line);border-radius:10px;padding:2px;background:var(--card)}
+.thcf{border:2px solid var(--ink);margin-bottom:16px}
+#thSujet{width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:var(--soft);color:var(--ink);font:600 15px var(--body);resize:vertical}
+.thcol input[type=checkbox]{width:auto}.thedit input[type=range]{width:110px;padding:0;vertical-align:middle}.thdrop input[type=file]{position:absolute;opacity:0;width:1px;height:1px}
+.thres{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:16px}
+.thres.v{grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))}
+.thcard{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px;display:grid;gap:8px}
+.thcard .thimg{position:relative;border-radius:12px;overflow:hidden;background:var(--soft)}
+.thcard img{width:100%;display:block}
+.thcard .thload{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.45);color:#fff;font-weight:800}
+.thacts{display:grid;grid-template-columns:1fr 1fr;gap:6px}.thacts .btn{padding:9px;font-size:13px}
+.thedit{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:8px}
+.thedit .grid{gap:8px}
+.therr{color:var(--err);background:var(--err-bg);border-radius:12px;padding:12px;font-size:14px}
 .ibhead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
 .ibhead h3 span{display:inline-block;background:#111;color:#d7ff3a;border-radius:999px;padding:2px 10px;font-size:.8em;margin-left:6px}
 .ibt{border:1px solid var(--line,#e5e2da);border-radius:14px;padding:4px 14px;margin:8px 0;background:var(--card,#fff)}
@@ -352,6 +378,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd" title="Photos et médias d'un post X ou TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="m21 16-4.5-4.5L7 21"/></svg><span>Photos</span></button>
     <button role="tab" id="tabAu" aria-selected="false" aria-controls="modeAu" title="Analyser ton audience et savoir quoi lui vendre"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5h18M6 16.5V12M10.5 16.5V8M15 16.5v-5M19.5 16.5V5"/></svg><span>Monétiser</span></button>
     <button role="tab" id="tabKit" aria-selected="false" aria-controls="modeKit" title="Visuels et description pour vendre ton ebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5 11 5h8v8l-7.5 7.5a1.5 1.5 0 0 1-2.1 0l-5.9-5.9a1.5 1.5 0 0 1 0-2.1z"/><circle cx="15.5" cy="8.5" r="1.4"/></svg><span>Kit de vente</span></button>
+    <button role="tab" id="tabTh" aria-selected="false" aria-controls="modeTh" title="Créer des miniatures YouTube, TikTok…"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m7 15 3-3.5 2.5 2.5L15 10l3 5"/><circle cx="8.5" cy="9" r="1.2"/></svg><span>Miniature</span></button>
   </nav>
 
   <div id="modeKit" role="tabpanel" hidden>
@@ -789,6 +816,92 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     </div>
   </div>
 
+  <div id="modeTh" role="tabpanel" hidden>
+    <h1>Des miniatures qui donnent<br><span>envie de cliquer</span>.</h1>
+    <section class="tile thcf" id="thCf" hidden>
+      <b>Dernière étape pour activer les miniatures</b>
+      <p class="hint" style="margin:4px 0 10px">Colle ton <b>Account ID Cloudflare</b> : ouvre <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">dash.cloudflare.com</a>, puis copie les 32 lettres et chiffres qui suivent <code>dash.cloudflare.com/</code> dans l'adresse en haut du navigateur.</p>
+      <div class="kline"><input id="thCfIn" placeholder="ex. 3f9a…(32 caractères)" autocomplete="off"><button class="btn" id="thCfGo" type="button">Activer</button></div>
+      <p class="ytmsg" id="thCfMsg" role="status"></p>
+    </section>
+    <div class="thgrid">
+      <section class="tile">
+        <div class="thtwo">
+          <div>
+            <label>Miniature modèle <small>(facultatif)</small></label>
+            <label class="drop thdrop" id="thRefDrop" for="thRef">
+              <input type="file" id="thRef" accept="image/*">
+              <img id="thRefImg" alt="" hidden>
+              <span class="thph"><b>Une miniature qui te plaît</b><small>Kopi s'en inspire, sans la copier</small></span>
+            </label>
+          </div>
+          <div>
+            <label>Personnage principal <small>(facultatif, 1 ou 2 photos)</small></label>
+            <label class="drop thdrop" id="thPhDrop" for="thPh">
+              <input type="file" id="thPh" accept="image/*" multiple>
+              <span class="thphs" id="thPhImgs"></span>
+              <span class="thph" id="thPhTxt"><b>Ta photo ou celle du personnage</b><small>Visage net, de face si possible</small></span>
+            </label>
+          </div>
+        </div>
+        <div class="grid" style="margin-top:14px">
+          <div><label for="thNiche">Niche</label><select id="thNiche"></select></div>
+          <div><label for="thN">Nombre de miniatures</label><select id="thN"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></div>
+        </div>
+        <label for="thSujet" style="margin-top:12px">Sujet de la vidéo</label>
+        <textarea id="thSujet" rows="2" placeholder="ex. Ce footballeur africain a tout perdu après sa carrière"></textarea>
+        <label for="thTexte" style="margin-top:12px">Texte sur la miniature <small>(vide = Kopi propose)</small></label>
+        <input id="thTexte" placeholder="ex. IL A TOUT PERDU" autocomplete="off">
+        <div class="grid" style="margin-top:12px">
+          <div><label for="thFort">Mot(s) en couleur</label><input id="thFort" placeholder="ex. TOUT PERDU" autocomplete="off"></div>
+          <div><label for="thBadge">Petite étiquette</label><input id="thBadge" placeholder="ex. HISTOIRE VRAIE" autocomplete="off"></div>
+        </div>
+        <label style="margin-top:14px">Style</label>
+        <div class="chips" id="thStyle"></div>
+        <label style="margin-top:10px">Format</label>
+        <div class="seg thseg" id="thFmt"><button data-v="16:9" class="on">YouTube 16:9</button><button data-v="9:16">Shorts / TikTok 9:16</button><button data-v="1:1">Carré</button><button data-v="4:5">Facebook 4:5</button></div>
+        <details class="thadv">
+          <summary>Réglages avancés</summary>
+          <label>Émotion du personnage</label>
+          <div class="chips" id="thEmo"></div>
+          <div class="grid" style="margin-top:10px">
+            <div><label for="thPos">Position du texte</label><select id="thPos"><option value="auto">Automatique</option><option value="left">À gauche</option><option value="right">À droite</option><option value="top">En haut</option><option value="bottom">En bas</option></select></div>
+            <div><label for="thFont">Police</label><select id="thFont"><option value="auto">Automatique (selon le style)</option><option value="montserrat">Montserrat Black (viral)</option><option value="impact">Anton (style Impact)</option><option value="bebas">Bebas Neue (fin et haut)</option><option value="archivo">Archivo Black (massif)</option><option value="gothic">Dela Gothic (très gras)</option><option value="unbounded">Unbounded (moderne)</option><option value="poppins">Poppins (propre)</option><option value="rond">Paytone (arrondi)</option><option value="cinzel">Cinzel (sacré, histoire)</option><option value="serif">Fraunces (élégant)</option></select></div>
+          </div>
+          <div class="grid" style="margin-top:10px">
+            <div><label>Couleur du texte</label><div class="thcol"><input type="color" id="thCol" value="#ffffff"><label class="check"><input type="checkbox" id="thColAuto" checked>Auto</label></div></div>
+            <div><label>Couleur du mot fort</label><div class="thcol"><input type="color" id="thAcc" value="#ffe500"><label class="check"><input type="checkbox" id="thAccAuto" checked>Auto</label></div></div>
+          </div>
+          <div class="grid" style="margin-top:10px">
+            <div><label for="thArrow">Flèche rouge</label><select id="thArrow"><option value="auto">Comme le modèle</option><option value="1">Oui</option><option value="0">Non</option></select></div>
+            <div><label for="thCircle">Cercle rouge</label><select id="thCircle"><option value="auto">Comme le modèle</option><option value="1">Oui</option><option value="0">Non</option></select></div>
+          </div>
+          <div class="grid" style="margin-top:10px">
+            <div><label for="thWord">Mot fort</label><select id="thWord"><option value="couleur">En couleur</option><option value="boite">Dans une boîte de couleur</option></select></div>
+            <div><label for="thQ">Qualité de l'image</label><select id="thQ"><option value="rapide">Rapide (≈ 50 par jour)</option><option value="qualite">Haute qualité (≈ 7 par jour)</option></select></div>
+          </div>
+          <div class="checks" style="margin-top:10px">
+            <label class="check"><input type="checkbox" id="thAfr" checked>Personnages noirs africains (si pas de photo)</label>
+            <label class="check"><input type="checkbox" id="thNoTxt">Sans texte (image seule)</label>
+          </div>
+        </details>
+        <button class="go" id="thGo">Créer les miniatures →</button>
+        <p class="hint">Kopi crée l'image avec l'IA (FLUX.2, gratuit via Cloudflare), puis pose lui-même le texte : lettres nettes, accents justes. Tu peux ensuite changer le texte sans refaire l'image.</p>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Progression</span>
+        <div class="big"><span id="thPct">0</span><small>%</small></div>
+        <div class="bar" id="thBar"><i id="thFill"></i></div>
+        <div class="state" id="thState"><span class="empty">Remplis au moins le sujet, le texte ou une miniature modèle.</span></div>
+      </aside>
+    </div>
+    <section class="list" id="thBox" hidden>
+      <h2>Tes miniatures</h2>
+      <p class="hint" id="thWhy"></p>
+      <div class="thres" id="thRes"></div>
+    </section>
+  </div>
+
   <div id="modeFile" role="tabpanel" hidden>
     <h1>Importe un audio.<br>Récupère <span>le texte complet</span>.</h1>
     <div class="bento">
@@ -934,7 +1047,7 @@ $('#fbFile').onchange=e=>{if(e.target.files[0])fbSend(e.target.files[0])};
 $('#fbDrop').addEventListener('drop',e=>{if(e.dataTransfer.files[0])fbSend(e.dataTransfer.files[0])});
 fbEnsure();
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],cl:['#tabCl','#modeCl'],mo:['#tabMo','#modeMo'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
+const MODES={acc:['#tabAcc','#modeAcc'],th:['#tabTh','#modeTh'],cl:['#tabCl','#modeCl'],mo:['#tabMo','#modeMo'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -1144,6 +1257,112 @@ $('#lb').addEventListener('click',e=>{if(e.target.id==='lb')lbClose()});
 document.addEventListener('keydown',e=>{if($('#lb').hidden)return;if(e.key==='Escape')lbClose();if(e.key==='ArrowLeft')lbStep(-1);if(e.key==='ArrowRight')lbStep(1)});
 let lbX=null;$('#lb').addEventListener('touchstart',e=>{lbX=e.touches[0].clientX},{passive:true});
 $('#lb').addEventListener('touchend',e=>{if(lbX===null)return;const dx=e.changedTouches[0].clientX-lbX;if(Math.abs(dx)>50)lbStep(dx<0?1:-1);lbX=null});
+
+
+/* ---------- miniatures ---------- */
+const TH_EMO={auto:'Auto',choc:'Choqué',colere:'En colère',peur:'Peur',serieux:'Sérieux',joie:'Joie',mystere:'Mystère',triste:'Triste',confiant:'Confiant'};
+let thStyleV='auto',thEmoV='auto',thFmtV='16:9',thRefF=null,thPhF=[],thTimer=null,thJob=null,thBusy=false;
+function thChips(box,items,cur,cb){box.innerHTML=Object.entries(items).map(([k,v])=>`<button type="button" data-v="${k}" class="${k===cur?'on':''}">${esc(v)}</button>`).join('');
+  box.querySelectorAll('button').forEach(b=>b.onclick=()=>{box.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));cb(b.dataset.v)})}
+async function thInit(){
+  try{const d=await (await fetch('/api/thumb/status')).json();
+    $('#thNiche').innerHTML=(d.niches||[]).map(n=>`<option>${esc(n)}</option>`).join('');
+    thChips($('#thStyle'),Object.fromEntries([['auto','Auto']].concat(d.styles||[])),thStyleV,v=>thStyleV=v);
+    thChips($('#thEmo'),TH_EMO,thEmoV,v=>thEmoV=v);
+    if(!d.cf){const a=localStorage.getItem('cfAccount');if(a&&await thCfSend(a,true))return;$('#thCf').hidden=false}
+  }catch(e){}
+}
+async function thCfSend(a,quiet){
+  try{const r=await fetch('/api/cf-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:a})});const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('cfAccount',a.trim())}catch(_){}
+    $('#thCf').hidden=true;return true}
+  catch(e){if(!quiet){$('#thCfMsg').textContent=e.message}return false}}
+$('#thCfGo').onclick=async()=>{$('#thCfMsg').textContent='Vérification…';if(await thCfSend($('#thCfIn').value,false))$('#thState').textContent='Cloudflare activé ✓ Tu peux créer tes miniatures.'};
+document.querySelectorAll('#thFmt button').forEach(b=>b.onclick=()=>{thFmtV=b.dataset.v;document.querySelectorAll('#thFmt button').forEach(x=>x.classList.toggle('on',x===b))});
+function thPickRef(f){if(!f)return;thRefF=f;const u=URL.createObjectURL(f);$('#thRefImg').src=u;$('#thRefImg').hidden=false;$('#thRefDrop .thph').hidden=true}
+function thPickPh(fs){thPhF=[...fs].filter(f=>f.type.startsWith('image/')||/\.(heic|jpe?g|png|webp)$/i.test(f.name)).slice(0,2);
+  $('#thPhImgs').innerHTML=thPhF.map(f=>`<img src="${URL.createObjectURL(f)}" alt="">`).join('');$('#thPhTxt').hidden=thPhF.length>0}
+$('#thRef').onchange=e=>thPickRef(e.target.files[0]);$('#thPh').onchange=e=>thPickPh(e.target.files);
+for(const [id,fn] of [['#thRefDrop',fs=>thPickRef(fs[0])],['#thPhDrop',fs=>thPickPh(fs)]]){
+  ['dragenter','dragover'].forEach(t=>$(id).addEventListener(t,e=>{e.preventDefault();$(id).classList.add('over')}));
+  ['dragleave','drop'].forEach(t=>$(id).addEventListener(t,e=>{e.preventDefault();$(id).classList.remove('over')}));
+  $(id).addEventListener('drop',e=>fn(e.dataTransfer.files))}
+function thProg(p,live){$('#thPct').textContent=Math.round(p);$('#thFill').style.width=p+'%';$('#thBar').classList.toggle('live',!!live)}
+function thSetBusy(on){thBusy=on;$('#thGo').classList.toggle('busy',on);$('#thGo').textContent=on?'Kopi crée tes miniatures…':'Créer les miniatures →'}
+function thErr(m){$('#thState').innerHTML=`<div class="err">${esc(m)}</div>`;thSetBusy(false);thProg(0,false)}
+$('#thGo').onclick=async()=>{
+  if(thBusy)return;
+  if(!thRefF&&!$('#thSujet').value.trim()&&!$('#thTexte').value.trim()){thErr('Donne au moins le sujet, le texte ou une miniature modèle.');return}
+  thSetBusy(true);thProg(2,true);$('#thState').textContent='Envoi…';
+  const fd=new FormData();if(thRefF)fd.append('ref',thRefF);thPhF.forEach(f=>fd.append('photo',f));
+  const add=(k,v)=>fd.append(k,v);
+  add('niche',$('#thNiche').value);add('sujet',$('#thSujet').value);add('texte',$('#thTexte').value);add('mot_fort',$('#thFort').value);add('badge',$('#thBadge').value);
+  add('style',thStyleV);add('emotion',thEmoV);add('format',thFmtV);add('position',$('#thPos').value);add('police',$('#thFont').value);
+  add('couleur',$('#thColAuto').checked?'auto':$('#thCol').value);add('accent',$('#thAccAuto').checked?'auto':$('#thAcc').value);
+  add('fleche',$('#thArrow').value);add('cercle',$('#thCircle').value);add('style_mot',$('#thWord').value);add('qualite',$('#thQ').value);
+  add('africain',$('#thAfr').checked?'1':'0');add('sans_texte',$('#thNoTxt').checked?'1':'');add('n',$('#thN').value);
+  try{const r=await fetch('/api/thumb',{method:'POST',body:fd});const d=await r.json();
+    if(!r.ok){if(d.need_cf)$('#thCf').hidden=false;throw new Error(d.error||'Erreur')}
+    try{localStorage.setItem('thumbJob',d.job_id)}catch(_){}thWatch(d.job_id)}
+  catch(e){thErr(e.message)}
+};
+function thCard(k,v,fmt){
+  const id=thJob,src=`/api/thumb/${id}/${k}?v=${v.ver}`;
+  if(v.status==='error')return `<div class="thcard"><div class="therr">Miniature ${k+1} : ${esc(v.error)}</div><button class="btn" data-redo="${k}">Réessayer</button></div>`;
+  if(v.status!=='done')return `<div class="thcard"><div class="thimg" style="aspect-ratio:${fmt.replace(':','/')}"><div class="thload">Création…</div></div></div>`;
+  const sp=v.spec;
+  return `<div class="thcard" data-k="${k}"><div class="thimg"><img src="${src}" alt="Miniature ${k+1}" loading="lazy">${v.busy?'<div class="thload">Nouvelle image…</div>':''}</div>
+  <div class="thacts"><a class="btn dl" href="/api/thumb/${id}/${k}?dl=1&v=${v.ver}">Télécharger</a><a class="btn" href="/api/thumb/${id}/${k}?raw=1&dl=1">Image sans texte</a>
+  <button class="btn" data-edit="${k}">Modifier le texte</button><button class="btn" data-redo="${k}">Refaire l'image</button></div>
+  <div class="thedit" id="thEd${k}" hidden>
+    <input data-f="texte" value="${esc(sp.texte||'')}" placeholder="Texte">
+    <div class="grid"><input data-f="mot_fort" value="${esc(sp.mot_fort||'')}" placeholder="Mot(s) en couleur"><input data-f="badge" value="${esc(sp.badge||'')}" placeholder="Étiquette"></div>
+    <div class="grid"><select data-f="position">${[['left','Texte à gauche'],['right','Texte à droite'],['top','En haut'],['bottom','En bas']].map(([a,b])=>`<option value="${a}" ${sp.position===a?'selected':''}>${b}</option>`).join('')}</select>
+      <select data-f="police">${[...$('#thFont').options].filter(o=>o.value!=='auto').map(o=>`<option value="${o.value}" ${sp.police===o.value?'selected':''}>${o.textContent}</option>`).join('')}</select></div>
+    <div class="grid"><div class="thcol"><input type="color" data-f="couleur" value="${sp.couleur||'#ffffff'}"><small>Texte</small><input type="color" data-f="accent" value="${sp.accent||'#ffe500'}"><small>Mot fort</small></div>
+      <select data-f="style_mot"><option value="couleur" ${sp.style_mot!=='boite'?'selected':''}>Mot en couleur</option><option value="boite" ${sp.style_mot==='boite'?'selected':''}>Mot dans une boîte</option></select></div>
+    <div class="checks"><label class="check"><input type="checkbox" data-f="fleche" ${sp.fleche?'checked':''}>Flèche</label><label class="check"><input type="checkbox" data-f="cercle" ${sp.cercle?'checked':''}>Cercle</label>
+      <label class="check">Taille <input type="range" min="0.6" max="1.5" step="0.05" data-f="taille" value="${sp.taille||1}"></label></div>
+    <button class="btn dl" data-apply="${k}">Appliquer</button></div></div>`;
+}
+let thLast=null;
+function thDraw(d){
+  $('#thBox').hidden=!(d.variants||[]).length;$('#thRes').classList.toggle('v',d.fmt==='9:16'||d.fmt==='4:5');
+  $('#thWhy').textContent=d.analysis?('Ce qui marche dans ton modèle : '+d.analysis):'';
+  const open=[...document.querySelectorAll('.thedit')].filter(e=>!e.hidden).map(e=>e.id);
+  $('#thRes').innerHTML=(d.variants||[]).map((v,k)=>thCard(k,v,d.fmt)).join('');
+  open.forEach(id=>{const e=document.getElementById(id);if(e)e.hidden=false});
+}
+function thWatch(id){
+  thJob=id;clearInterval(thTimer);thSetBusy(true);
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/thumb/'+id);d=await r.json();if(!r.ok)throw d}
+    catch(e){clearInterval(thTimer);thErr((e&&e.error)||'Connexion perdue');try{localStorage.removeItem('thumbJob')}catch(_){}return}
+    const sig=JSON.stringify(d.variants.map(v=>[v.status,v.ver,v.busy]));
+    if(sig!==thLast){thLast=sig;if(!document.querySelector('.thedit:not([hidden]) :focus'))thDraw(d)}
+    const busy=d.variants.some(v=>v.busy);
+    if(d.phase!=='done'&&d.phase!=='error'){thProg(Math.max(3,d.pct||3),true);$('#thState').textContent=d.step||'Préparation…';return}
+    thSetBusy(false);
+    if(d.phase==='error'){thErr(d.error);clearInterval(thTimer);return}
+    thProg(100,false);$('#thState').innerHTML='<b>Terminé ✓</b> <small>Clique sur « Modifier le texte » pour ajuster sans refaire l\'image.</small>';
+    if(!busy){clearInterval(thTimer);thTimer=null}
+  };
+  tick();thTimer=setInterval(tick,2500);
+}
+$('#thRes').addEventListener('click',async e=>{
+  const ed=e.target.closest('[data-edit]'),re=e.target.closest('[data-redo]'),ap=e.target.closest('[data-apply]');
+  if(ed){const b=$('#thEd'+ed.dataset.edit);b.hidden=!b.hidden;return}
+  if(re){re.disabled=true;re.textContent='Nouvelle image…';await fetch(`/api/thumb/${thJob}/${re.dataset.redo}/redo`,{method:'POST'});thLast=null;if(!thTimer)thWatch(thJob);return}
+  if(ap){const k=ap.dataset.apply,box=$('#thEd'+k),body={};
+    box.querySelectorAll('[data-f]').forEach(x=>body[x.dataset.f]=x.type==='checkbox'?x.checked:x.value);
+    ap.textContent='Application…';
+    try{const r=await fetch(`/api/thumb/${thJob}/${k}/edit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);
+      const img=document.querySelector(`.thcard[data-k="${k}"] img`);img.src=`/api/thumb/${thJob}/${k}?v=${d.ver}`;
+      document.querySelector(`.thcard[data-k="${k}"] a.dl`).href=`/api/thumb/${thJob}/${k}?dl=1&v=${d.ver}`;ap.textContent='Appliqué ✓';setTimeout(()=>ap.textContent='Appliquer',1500)}
+    catch(err){ap.textContent=err.message||'Erreur'}}
+});
+thInit();
+try{const j=localStorage.getItem('thumbJob');if(j)thWatch(j)}catch(e){}
 
 /* ---------- monétisation ---------- */
 let aPlat='youtube',aLimit=40,aTimer=null,aBusy=false,aCur=null;

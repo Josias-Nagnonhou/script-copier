@@ -4253,7 +4253,7 @@ def _keepalive():
     url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kopi-x5eh.onrender.com").rstrip("/") + "/ping"
     while True:
         time.sleep(240)
-        busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing")
+        busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
                    for j in list(JOBS.values()))
         if busy:
             try:

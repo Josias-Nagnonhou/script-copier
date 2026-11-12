@@ -850,7 +850,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
             <label class="drop thdrop" id="thPhDrop" for="thPh">
               <input type="file" id="thPh" accept="image/*" multiple>
               <span class="thphs" id="thPhImgs"></span>
-              <span class="thph" id="thPhTxt"><b>Ta photo ou celle du personnage</b><small>Visage net, de face si possible</small></span>
+              <span class="thph" id="thPhTxt"><b>Ta photo ou celle du personnage</b><small>Le visage est gardé tel quel, jamais redessiné</small></span>
             </label>
           </div>
         </div>
@@ -883,7 +883,11 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           <div class="chips" id="thEmo"></div>
           <div class="grid" style="margin-top:10px">
             <div><label for="thPos">Position du texte</label><select id="thPos"><option value="auto">Automatique</option><option value="left">À gauche</option><option value="right">À droite</option><option value="top">En haut</option><option value="bottom">En bas</option></select></div>
-            <div><label for="thFont">Police</label><select id="thFont"><option value="auto">Automatique (selon le style)</option><option value="montserrat">Montserrat Black (viral)</option><option value="impact">Anton (style Impact)</option><option value="bebas">Bebas Neue (fin et haut)</option><option value="archivo">Archivo Black (massif)</option><option value="gothic">Dela Gothic (très gras)</option><option value="unbounded">Unbounded (moderne)</option><option value="poppins">Poppins (propre)</option><option value="rond">Paytone (arrondi)</option><option value="cinzel">Cinzel (sacré, histoire)</option><option value="serif">Fraunces (élégant)</option></select></div>
+            <div><label for="thFont">Police</label><select id="thFont"><option value="auto">Automatique (choisie selon le sujet)</option></select></div>
+          </div>
+          <div class="grid" style="margin-top:10px">
+            <div><label for="thBlur">Flou du décor</label><select id="thBlur"><option value="auto">Automatique (selon le sujet)</option><option value="0">Net</option><option value="1">Léger</option><option value="2">Moyen</option><option value="3">Fort</option></select></div>
+            <div></div>
           </div>
           <div class="grid" style="margin-top:10px">
             <div><label>Couleur du texte</label><div class="thcol"><input type="color" id="thCol" value="#ffffff"><label class="check"><input type="checkbox" id="thColAuto" checked>Auto</label></div></div>
@@ -903,7 +907,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
           </div>
         </details>
         <button class="go" id="thGo">Créer les miniatures →</button>
-        <p class="hint">Kopi crée l'image avec l'IA (FLUX.2, gratuit via Cloudflare), puis pose lui-même le texte : lettres nettes, accents justes. Tu peux ensuite changer le texte sans refaire l'image.</p>
+        <p class="hint">L'IA (FLUX.2, gratuite via Cloudflare) crée le décor. Ta photo est détourée et posée telle quelle en gros plan : le visage n'est jamais redessiné. Kopi pose ensuite le texte (45 polices, accents justes) et tu peux le changer sans refaire l'image.</p>
       </section>
       <aside class="tile stat">
         <span class="lbl">Progression</span>
@@ -1279,7 +1283,7 @@ $('#lb').addEventListener('touchend',e=>{if(lbX===null)return;const dx=e.changed
 
 /* ---------- miniatures ---------- */
 const TH_EMO={auto:'Auto',choc:'Choqué',colere:'En colère',peur:'Peur',serieux:'Sérieux',joie:'Joie',mystere:'Mystère',triste:'Triste',confiant:'Confiant'};
-let thStyleV='auto',thEmoV='auto',thFmtV='16:9',thRefF=null,thPhF=[],thTimer=null,thJob=null,thBusy=false;
+let thFonts=[],thStyleV='auto',thEmoV='auto',thFmtV='16:9',thRefF=null,thPhF=[],thTimer=null,thJob=null,thBusy=false;
 function thChips(box,items,cur,cb){box.innerHTML=Object.entries(items).map(([k,v])=>`<button type="button" data-v="${k}" class="${k===cur?'on':''}">${esc(v)}</button>`).join('');
   box.querySelectorAll('button').forEach(b=>b.onclick=()=>{box.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));cb(b.dataset.v)})}
 async function thInit(){
@@ -1287,6 +1291,7 @@ async function thInit(){
     $('#thNiche').innerHTML='<option value="">Automatique</option>'+(d.niches||[]).map(n=>`<option>${esc(n)}</option>`).join('');
     thChips($('#thStyle'),Object.fromEntries([['auto','Auto']].concat(d.styles||[])),thStyleV,v=>thStyleV=v);
     thChips($('#thEmo'),TH_EMO,thEmoV,v=>thEmoV=v);
+    thFonts=d.fonts||[];$('#thFont').innerHTML='<option value="auto">Automatique (choisie selon le sujet)</option>'+thFonts.map(([k,v])=>`<option value="${k}">${esc(k)} · ${esc(v)}</option>`).join('');
     if(!d.cf){const a=localStorage.getItem('cfAccount');if(a&&await thCfSend(a,true))return;$('#thCf').hidden=false}
   }catch(e){}
 }
@@ -1328,7 +1333,7 @@ $('#thGo').onclick=async()=>{
   add('niche',$('#thNiche').value);add('sujet',$('#thSujet').value);add('texte',$('#thTexte').value);add('mot_fort',$('#thFort').value);add('badge',$('#thBadge').value);
   add('style',thStyleV);add('emotion',thEmoV);add('format',thFmtV);add('position',$('#thPos').value);add('police',$('#thFont').value);
   add('couleur',$('#thColAuto').checked?'auto':$('#thCol').value);add('accent',$('#thAccAuto').checked?'auto':$('#thAcc').value);
-  add('fleche',$('#thArrow').value);add('cercle',$('#thCircle').value);add('style_mot',$('#thWord').value);add('qualite',$('#thQ').value);
+  add('fleche',$('#thArrow').value);add('flou',$('#thBlur').value);add('cercle',$('#thCircle').value);add('style_mot',$('#thWord').value);add('qualite',$('#thQ').value);
   add('africain',$('#thAfr').checked?'1':'0');add('sans_texte',$('#thNoTxt').checked?'1':'');add('n',$('#thN').value);
   try{const r=await fetch('/api/thumb',{method:'POST',body:fd});const d=await r.json();
     if(!r.ok){if(d.need_cf)$('#thCf').hidden=false;throw new Error(d.error||'Erreur')}
@@ -1348,9 +1353,11 @@ function thCard(k,v,fmt){
     <input data-f="texte" value="${esc(sp.texte||'')}" placeholder="Texte">
     <div class="grid"><input data-f="mot_fort" value="${esc(sp.mot_fort||'')}" placeholder="Mot(s) en couleur"><input data-f="badge" value="${esc(sp.badge||'')}" placeholder="Étiquette"></div>
     <div class="grid"><select data-f="position">${[['left','Texte à gauche'],['right','Texte à droite'],['top','En haut'],['bottom','En bas']].map(([a,b])=>`<option value="${a}" ${sp.position===a?'selected':''}>${b}</option>`).join('')}</select>
-      <select data-f="police">${[...$('#thFont').options].filter(o=>o.value!=='auto').map(o=>`<option value="${o.value}" ${sp.police===o.value?'selected':''}>${o.textContent}</option>`).join('')}</select></div>
+      <select data-f="police">${thFonts.map(([a,b])=>`<option value="${a}" ${sp.police===a?'selected':''}>${esc(a)} · ${esc(b)}</option>`).join('')}</select></div>
     <div class="grid"><div class="thcol"><input type="color" data-f="couleur" value="${sp.couleur||'#ffffff'}"><small>Texte</small><input type="color" data-f="accent" value="${sp.accent||'#ffe500'}"><small>Mot fort</small></div>
       <select data-f="style_mot"><option value="couleur" ${sp.style_mot!=='boite'?'selected':''}>Mot en couleur</option><option value="boite" ${sp.style_mot==='boite'?'selected':''}>Mot dans une boîte</option></select></div>
+    <div class="grid"><label class="check">Flou du décor <input type="range" min="0" max="3" step="0.5" data-f="flou" value="${sp.flou||0}"></label>
+      <label class="check"><input type="checkbox" data-f="halo" ${sp.halo!==false?'checked':''}>Contour lumineux autour de la personne</label></div>
     <div class="checks"><label class="check"><input type="checkbox" data-f="fleche" ${sp.fleche?'checked':''}>Flèche</label><label class="check"><input type="checkbox" data-f="cercle" ${sp.cercle?'checked':''}>Cercle</label>
       <label class="check">Taille <input type="range" min="0.6" max="1.5" step="0.05" data-f="taille" value="${sp.taille||1}"></label></div>
     <button class="btn dl" data-apply="${k}">Appliquer</button></div></div>`;

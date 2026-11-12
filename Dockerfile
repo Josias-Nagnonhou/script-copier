@@ -11,6 +11,11 @@ RUN python -c "import urllib.request as u; u.urlretrieve('https://github.com/Rik
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -U -r requirements.txt
+# Détourage des personnes pour les miniatures (MediaPipe, léger) : le visage n'est jamais redessiné
+RUN pip install --no-cache-dir --no-deps mediapipe==0.10.32 && pip install --no-cache-dir absl-py flatbuffers matplotlib \
+    && mkdir -p /opt/models && python -c "import urllib.request as u; u.urlretrieve('https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite', '/opt/models/selfie_multiclass_256x256.tflite')" \
+    && python -c "import mediapipe; from mediapipe.tasks.python import vision; print('mediapipe ok', mediapipe.__version__)"
+ENV THUMB_SEG_MODEL=/opt/models/selfie_multiclass_256x256.tflite
 COPY . .
 
 ENV PYTHONUNBUFFERED=1 MALLOC_ARENA_MAX=2

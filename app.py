@@ -1,6 +1,6 @@
 """Kopi — récupère la transcription de plusieurs vidéos TikTok / YouTube
 et les rassemble dans un document Word (Script 1, Script 2, ...)."""
-import os, re, random, zipfile, json, time, uuid, glob, shutil, threading, tempfile, subprocess, datetime, html
+import os, sys, re, random, zipfile, json, time, uuid, glob, shutil, threading, tempfile, subprocess, datetime, html
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -1400,9 +1400,21 @@ def thumb_plan(job, analysis):
            "- texte : 2 à 5 mots en français, percutants, en majuscules naturelles, qui créent la curiosité (pas un "
            "résumé, pas de point final) ;\n")
         + "- mot_fort : le ou les 1-2 mots du texte à mettre en couleur (copiés tels quels) ;\n"
+        + "- police : la police la plus adaptée au sujet et à l'émotion, parmi : "
+        + "; ".join(f"{k} = {v[2]}" for k, v in TH.FONTS.items()) + " ;\n"
+        + "- flou : flou du décor de 0 à 3 (0 = net ; 1-2 = léger flou qui fait ressortir le personnage et le "
+          "texte, idéal pour la plupart des sujets avec une personne ; 3 = fort, quand le décor est chargé) ;\n"
+        + "- accent : couleur hexadécimale du mot fort, choisie par psychologie des couleurs et pour contraster avec "
+          "le décor (jaune = attention, rouge = urgence/danger, vert = argent/réussite, or = luxe/sacré, "
+          "cyan = tech/mystère froid, orange = énergie), ou \"auto\" ;\n"
         + ("- badge : " + (f"EXACTEMENT « {o['badge']} »" if o.get("badge") else
                           "2-3 mots courts optionnels (ex. « HISTOIRE VRAIE », « PARTIE 2 ») ou chaîne vide") + ".\n")
-        + 'Réponds en JSON : {"variantes": [{"scene_en": "", "texte": "", "mot_fort": "", "badge": ""}]}')
+        + "Règles de psychologie du clic : texte de 2 à 4 mots (5 max), il crée une question ou une tension (écart de "
+          "curiosité), il ne répète pas le titre ; un seul message par miniature ; contraste fort ; émotion visible ; "
+          "un chiffre précis attire l'œil ; les mots négatifs ou interdits (JAMAIS, VÉRITÉ, CACHÉ, ERREUR) marchent "
+          "quand c'est vrai. Les scènes contiennent des objets symboliques du sujet, reconnaissables en une seconde.\n"
+        + 'Réponds en JSON : {"variantes": [{"scene_en": "", "texte": "", "mot_fort": "", "badge": "", '
+          '"police": "", "flou": 1, "accent": "auto"}]}')
     try:
         out = parse_json_obj(groq_chat([{"role": "user", "content": prompt}], max_tokens=2500, json_mode=True,
                                        tag="miniature"))
@@ -1426,6 +1438,9 @@ def thumb_plan(job, analysis):
             v["mot_fort"] = o["mot_fort"]
         if o.get("badge"):
             v["badge"] = o["badge"]
+        v.setdefault("police", "")
+        v.setdefault("flou", 1 if job["photos"] else 0)
+        v.setdefault("accent", "auto")
         if not v.get("texte") and not o.get("sans_texte"):
             v["texte"] = " ".join((o.get("sujet") or o.get("niche") or "").split()[:5])
         if o.get("sans_texte"):
@@ -1437,14 +1452,44 @@ def thumb_spec(job, v, analysis):
     o, a = job["opts"], analysis or {}
     st = TH.STYLES.get(job["style"], TH.STYLES["viral"])
     pick = lambda key, ak, default: o.get(key) if o.get(key) not in (None, "", "auto") else (a.get(ak) or default)
-    pol = pick("police", "police", st["font"])
+    pol = o.get("police") if o.get("police") not in (None, "", "auto") else (v.get("police") or a.get("police") or st["font"])
+    acc = o.get("accent") if o.get("accent") not in (None, "", "auto") else (
+        v.get("accent") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(v.get("accent") or "")) else (a.get("couleur_accent") or "auto"))
+    try:
+        flou = float(o.get("flou")) if o.get("flou") not in (None, "", "auto") else float(v.get("flou", 0))
+    except (TypeError, ValueError):
+        flou = 1.0 if job["photos"] else 0.0
     return {"texte": v.get("texte", ""), "mot_fort": v.get("mot_fort", ""), "badge": v.get("badge", ""),
-            "position": job["pos"], "police": pol if pol in TH.FONTS else st["font"],
-            "couleur": pick("couleur", "couleur_texte", st["color"]), "accent": pick("accent", "couleur_accent", st["accent"]),
+            "position": job["pos"], "police": pol if pol in TH.FONTS else st["font"], "flou": max(0, min(3, flou)),
+            "halo": True,
+            "couleur": pick("couleur", "couleur_texte", "#FFFFFF"), "accent": acc,
             "fleche": o.get("fleche") == "1" or (o.get("fleche") == "auto" and bool(a.get("fleche"))),
             "cercle": o.get("cercle") == "1" or (o.get("cercle") == "auto" and bool(a.get("cercle"))),
             "style_mot": o.get("style_mot") or "couleur", "taille": float(o.get("taille") or 1),
             "contraste": True, "vignette": True}
+
+
+def thumb_cutouts(job):
+    """Détoure chaque photo de personne dans un processus à part (le visage n'est jamais redessiné)."""
+    job["people"] = []
+    for i, ph in enumerate(job["photos"]):
+        out = os.path.join(job["dir"], f"detoure_{i}.png")
+        try:
+            r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "cutout.py"),
+                                ph, out], capture_output=True, text=True, timeout=180)
+            info = json.loads((r.stdout.strip().splitlines() or ["{}"])[-1])
+        except Exception as e:
+            info = {"error": f"Détourage impossible : {str(e)[:120]}"}
+        if info.get("error") or not os.path.exists(out):
+            raise RuntimeError((info.get("error") or "Détourage impossible.") +
+                               " Essaie une photo nette où la personne est bien visible.")
+        job["people"].append({"path": out, "face": info.get("face")})
+        print(f"[miniature {job['id']}] personne {i + 1} détourée (visage {'trouvé' if info.get('face') else 'non trouvé'})",
+              flush=True)
+
+
+def thumb_people(job):
+    return [{"img": Image.open(p["path"]).convert("RGBA"), "face": p.get("face")} for p in job.get("people") or []]
 
 
 def thumb_render_one(job, k, new_seed=False):
@@ -1452,10 +1497,10 @@ def thumb_render_one(job, k, new_seed=False):
     if new_seed or "seed" not in v:
         v["seed"] = random.randint(1, 2_000_000_000)
     prompt = TH.build_prompt(v["scene_en"], job["style"], job["emotion"], job["fmt"], bool(job["ref"]),
-                             len(job["photos"]), job["pos"] if v["spec"].get("texte") else "none",
+                             len(job.get("people") or []), v["spec"].get("position") or job["pos"],
                              african=job["opts"].get("africain") != "0")
     v["prompt"] = prompt
-    refs = ([job["ref"]] if job["ref"] else []) + job["photos"]
+    refs = [job["ref"]] if job["ref"] else []  # la photo de la personne n'est JAMAIS envoyée à l'IA
     img = TH.generate(prompt, job["fmt"], CF_ACCOUNT, CF_TOKEN, refs, job["quality"], v["seed"],
                       log=lambda m: print(m, flush=True))
     raw = os.path.join(job["dir"], f"raw_{k}.jpg")
@@ -1466,7 +1511,7 @@ def thumb_render_one(job, k, new_seed=False):
 
 def thumb_compose_one(job, k):
     v = job["variants"][k]
-    out = TH.compose(Image.open(v["raw"]).convert("RGB"), v["spec"], job["fmt"])
+    out = TH.compose(Image.open(v["raw"]).convert("RGB"), v["spec"], job["fmt"], people=thumb_people(job))
     v["ver"] = v.get("ver", 0) + 1
     v["file"] = os.path.join(job["dir"], f"miniature_{k + 1}.jpg")
     TH.save(out, v["file"])
@@ -1479,6 +1524,9 @@ def run_thumb_job(job):
     try:
         job["phase"] = "transcribing"
         analysis = {}
+        if job["photos"]:
+            job["step"] = "Détourage de la photo (le visage reste intact)…"
+            thumb_cutouts(job)
         if job.get("audio"):
             job["step"] = "Écoute de ta vidéo…"
             job["script"] = (job.get("script", "") + " " + thumb_transcribe(job, job["audio"])).strip()
@@ -1568,6 +1616,7 @@ def thumb_status():
     if not authed():
         return jsonify(error="Non connecté"), 401
     return jsonify(cf=cf_ready(), token=bool(CF_TOKEN), styles=[[k, v["label"]] for k, v in TH.STYLES.items()],
+                   fonts=[[k, v[2]] for k, v in TH.FONTS.items()],
                    niches=TH.NICHES)
 
 
@@ -1640,7 +1689,7 @@ def start_thumb():
         return jsonify(error=str(e)), 400
     opts = {k: (fo.get(k) or "").strip()[:300] for k in (
         "niche", "sujet", "texte", "mot_fort", "badge", "police", "couleur", "accent", "fleche", "cercle",
-        "style_mot", "taille", "africain", "sans_texte")}
+        "style_mot", "taille", "africain", "sans_texte", "flou")}
     if not (ref_p or opts["sujet"] or opts["texte"] or script or audio_p):
         shutil.rmtree(d, ignore_errors=True)
         return jsonify(error="Donne au moins un sujet, un script, l'audio de la vidéo ou une miniature modèle."), 400
@@ -1711,9 +1760,14 @@ def thumb_edit(jid, k):
     for key in ("texte", "mot_fort", "badge", "position", "police", "couleur", "accent", "style_mot"):
         if key in d:
             sp[key] = str(d[key])[:200]
-    for key in ("fleche", "cercle"):
+    for key in ("fleche", "cercle", "halo"):
         if key in d:
             sp[key] = bool(d[key])
+    if "flou" in d:
+        try:
+            sp["flou"] = max(0, min(3, float(d["flou"])))
+        except (TypeError, ValueError):
+            pass
     if "taille" in d:
         try:
             sp["taille"] = max(.6, min(1.5, float(d["taille"])))

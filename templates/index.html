@@ -308,6 +308,16 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .thadv{margin-top:12px;border:1px solid var(--line);border-radius:14px;padding:10px 14px}
 .thadv summary{cursor:pointer;font-weight:800}.thadv[open] summary{margin-bottom:10px}
 .thcol{display:flex;gap:10px;align-items:center}.thcol input[type=color]{width:46px;height:36px;border:1px solid var(--line);border-radius:10px;padding:2px;background:var(--card)}
+.thvid [hidden],.thdrop [hidden]{display:none!important}
+.thvid{margin-top:14px;border:1px solid var(--line);border-radius:16px;padding:12px 14px;background:var(--soft)}
+.thvid .seg{background:var(--card)}
+#thScript{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:13px;background:var(--card);color:var(--ink);font:500 14px/1.5 var(--body);resize:vertical}
+.thvid .drop{background:var(--card)}
+.thbrief{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 18px;margin:0 0 16px;display:grid;gap:10px}
+.thbrief h3{margin:0;font:800 16px var(--display)}.thbrief p{margin:0}
+.thsug{display:flex;flex-wrap:wrap;gap:7px}.thsug button{border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:99px;padding:6px 12px;font:700 13px var(--body);cursor:pointer}
+.thsug button:hover{border-color:var(--ink)}
+.thtitles li{margin:4px 0}.thtitles button{margin-left:6px;border:0;background:none;color:var(--muted);cursor:pointer;font-weight:700}
 .thcf{border:2px solid var(--ink);margin-bottom:16px}
 #thSujet{width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:var(--soft);color:var(--ink);font:600 15px var(--body);resize:vertical}
 .thcol input[type=checkbox]{width:auto}.thedit input[type=range]{width:110px;padding:0;vertical-align:middle}.thdrop input[type=file]{position:absolute;opacity:0;width:1px;height:1px}
@@ -844,11 +854,18 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
             </label>
           </div>
         </div>
+        <div class="thvid">
+          <label>Ta vidéo <small>(recommandé : Kopi comprend la vidéo et trouve lui-même le texte qui fait cliquer)</small></label>
+          <div class="seg thseg" id="thSrc"><button data-v="txt" class="on">Coller le script</button><button data-v="doc">Script en PDF / Word</button><button data-v="aud">Audio ou vidéo</button></div>
+          <textarea id="thScript" rows="4" placeholder="Colle ici le script ou le texte de ta vidéo…"></textarea>
+          <label class="drop" id="thDocDrop" for="thDoc" hidden><input type="file" id="thDoc" accept=".pdf,.docx,.txt,.md,.srt,.vtt"><b id="thDocName">Choisir le script (PDF, Word, TXT, SRT)</b><small>ou glisse-le ici</small></label>
+          <label class="drop" id="thAudDrop" for="thAud" hidden><input type="file" id="thAud" accept="audio/*,video/*,.mp3,.m4a,.wav,.mp4,.mov,.webm,.ogg,.opus"><b id="thAudName">Choisir l'audio ou la vidéo</b><small>Kopi écoute les 30 premières minutes</small></label>
+        </div>
         <div class="grid" style="margin-top:14px">
-          <div><label for="thNiche">Niche</label><select id="thNiche"></select></div>
+          <div><label for="thNiche">Niche</label><select id="thNiche"><option value="">Automatique</option></select></div>
           <div><label for="thN">Nombre de miniatures</label><select id="thN"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></div>
         </div>
-        <label for="thSujet" style="margin-top:12px">Sujet de la vidéo</label>
+        <label for="thSujet" style="margin-top:12px">Sujet de la vidéo <small>(facultatif si tu donnes le script)</small></label>
         <textarea id="thSujet" rows="2" placeholder="ex. Ce footballeur africain a tout perdu après sa carrière"></textarea>
         <label for="thTexte" style="margin-top:12px">Texte sur la miniature <small>(vide = Kopi propose)</small></label>
         <input id="thTexte" placeholder="ex. IL A TOUT PERDU" autocomplete="off">
@@ -892,12 +909,13 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
         <span class="lbl">Progression</span>
         <div class="big"><span id="thPct">0</span><small>%</small></div>
         <div class="bar" id="thBar"><i id="thFill"></i></div>
-        <div class="state" id="thState"><span class="empty">Remplis au moins le sujet, le texte ou une miniature modèle.</span></div>
+        <div class="state" id="thState"><span class="empty">Donne au moins le script, l'audio, le sujet ou une miniature modèle.</span></div>
       </aside>
     </div>
     <section class="list" id="thBox" hidden>
       <h2>Tes miniatures</h2>
       <p class="hint" id="thWhy"></p>
+      <div class="thbrief" id="thBrief" hidden></div>
       <div class="thres" id="thRes"></div>
     </section>
   </div>
@@ -1266,7 +1284,7 @@ function thChips(box,items,cur,cb){box.innerHTML=Object.entries(items).map(([k,v
   box.querySelectorAll('button').forEach(b=>b.onclick=()=>{box.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));cb(b.dataset.v)})}
 async function thInit(){
   try{const d=await (await fetch('/api/thumb/status')).json();
-    $('#thNiche').innerHTML=(d.niches||[]).map(n=>`<option>${esc(n)}</option>`).join('');
+    $('#thNiche').innerHTML='<option value="">Automatique</option>'+(d.niches||[]).map(n=>`<option>${esc(n)}</option>`).join('');
     thChips($('#thStyle'),Object.fromEntries([['auto','Auto']].concat(d.styles||[])),thStyleV,v=>thStyleV=v);
     thChips($('#thEmo'),TH_EMO,thEmoV,v=>thEmoV=v);
     if(!d.cf){const a=localStorage.getItem('cfAccount');if(a&&await thCfSend(a,true))return;$('#thCf').hidden=false}
@@ -1279,6 +1297,15 @@ async function thCfSend(a,quiet){
   catch(e){if(!quiet){$('#thCfMsg').textContent=e.message}return false}}
 $('#thCfGo').onclick=async()=>{$('#thCfMsg').textContent='Vérification…';if(await thCfSend($('#thCfIn').value,false))$('#thState').textContent='Cloudflare activé ✓ Tu peux créer tes miniatures.'};
 document.querySelectorAll('#thFmt button').forEach(b=>b.onclick=()=>{thFmtV=b.dataset.v;document.querySelectorAll('#thFmt button').forEach(x=>x.classList.toggle('on',x===b))});
+let thSrcV='txt',thDocF=null,thAudF=null,thBriefD=null;
+document.querySelectorAll('#thSrc button').forEach(b=>b.onclick=()=>{thSrcV=b.dataset.v;document.querySelectorAll('#thSrc button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#thScript').hidden=thSrcV!=='txt';$('#thDocDrop').hidden=thSrcV!=='doc';$('#thAudDrop').hidden=thSrcV!=='aud'});
+$('#thDoc').onchange=e=>{thDocF=e.target.files[0]||null;$('#thDocName').textContent=thDocF?thDocF.name:'Choisir le script (PDF, Word, TXT, SRT)'};
+$('#thAud').onchange=e=>{thAudF=e.target.files[0]||null;$('#thAudName').textContent=thAudF?(thAudF.name+' · '+fmtSize(thAudF.size)):'Choisir l\'audio ou la vidéo'};
+for(const [id,set] of [['#thDocDrop',f=>{thDocF=f;$('#thDocName').textContent=f.name}],['#thAudDrop',f=>{thAudF=f;$('#thAudName').textContent=f.name+' · '+fmtSize(f.size)}]]){
+  ['dragenter','dragover'].forEach(t=>$(id).addEventListener(t,e=>{e.preventDefault();$(id).classList.add('over')}));
+  ['dragleave','drop'].forEach(t=>$(id).addEventListener(t,e=>{e.preventDefault();$(id).classList.remove('over')}));
+  $(id).addEventListener('drop',e=>{if(e.dataTransfer.files[0])set(e.dataTransfer.files[0])})}
 function thPickRef(f){if(!f)return;thRefF=f;const u=URL.createObjectURL(f);$('#thRefImg').src=u;$('#thRefImg').hidden=false;$('#thRefDrop .thph').hidden=true}
 function thPickPh(fs){thPhF=[...fs].filter(f=>f.type.startsWith('image/')||/\.(heic|jpe?g|png|webp)$/i.test(f.name)).slice(0,2);
   $('#thPhImgs').innerHTML=thPhF.map(f=>`<img src="${URL.createObjectURL(f)}" alt="">`).join('');$('#thPhTxt').hidden=thPhF.length>0}
@@ -1292,9 +1319,11 @@ function thSetBusy(on){thBusy=on;$('#thGo').classList.toggle('busy',on);$('#thGo
 function thErr(m){$('#thState').innerHTML=`<div class="err">${esc(m)}</div>`;thSetBusy(false);thProg(0,false)}
 $('#thGo').onclick=async()=>{
   if(thBusy)return;
-  if(!thRefF&&!$('#thSujet').value.trim()&&!$('#thTexte').value.trim()){thErr('Donne au moins le sujet, le texte ou une miniature modèle.');return}
+  const scr=thSrcV==='txt'?$('#thScript').value.trim():'',sf=thSrcV==='doc'?thDocF:(thSrcV==='aud'?thAudF:null);
+  if(!thRefF&&!$('#thSujet').value.trim()&&!$('#thTexte').value.trim()&&!scr&&!sf){thErr('Donne au moins le script, l\'audio, le sujet ou une miniature modèle.');return}
   thSetBusy(true);thProg(2,true);$('#thState').textContent='Envoi…';
   const fd=new FormData();if(thRefF)fd.append('ref',thRefF);thPhF.forEach(f=>fd.append('photo',f));
+  if(scr)fd.append('script',scr);if(sf)fd.append('script_file',sf);
   const add=(k,v)=>fd.append(k,v);
   add('niche',$('#thNiche').value);add('sujet',$('#thSujet').value);add('texte',$('#thTexte').value);add('mot_fort',$('#thFort').value);add('badge',$('#thBadge').value);
   add('style',thStyleV);add('emotion',thEmoV);add('format',thFmtV);add('position',$('#thPos').value);add('police',$('#thFont').value);
@@ -1315,6 +1344,7 @@ function thCard(k,v,fmt){
   <div class="thacts"><a class="btn dl" href="/api/thumb/${id}/${k}?dl=1&v=${v.ver}">Télécharger</a><a class="btn" href="/api/thumb/${id}/${k}?raw=1&dl=1">Image sans texte</a>
   <button class="btn" data-edit="${k}">Modifier le texte</button><button class="btn" data-redo="${k}">Refaire l'image</button></div>
   <div class="thedit" id="thEd${k}" hidden>
+    ${thBriefD&&(thBriefD.textes||[]).length?`<div class="thsug">${thBriefD.textes.map((t,i)=>`<button type="button" data-sug="${k}" data-t="${esc(t)}" data-m="${esc((thBriefD.mots_forts||[])[i]||'')}">${esc(t)}</button>`).join('')}</div>`:''}
     <input data-f="texte" value="${esc(sp.texte||'')}" placeholder="Texte">
     <div class="grid"><input data-f="mot_fort" value="${esc(sp.mot_fort||'')}" placeholder="Mot(s) en couleur"><input data-f="badge" value="${esc(sp.badge||'')}" placeholder="Étiquette"></div>
     <div class="grid"><select data-f="position">${[['left','Texte à gauche'],['right','Texte à droite'],['top','En haut'],['bottom','En bas']].map(([a,b])=>`<option value="${a}" ${sp.position===a?'selected':''}>${b}</option>`).join('')}</select>
@@ -1329,6 +1359,10 @@ let thLast=null;
 function thDraw(d){
   $('#thBox').hidden=!(d.variants||[]).length;$('#thRes').classList.toggle('v',d.fmt==='9:16'||d.fmt==='4:5');
   $('#thWhy').textContent=d.analysis?('Ce qui marche dans ton modèle : '+d.analysis):'';
+  thBriefD=d.brief;const B=d.brief;$('#thBrief').hidden=!B;
+  if(B)$('#thBrief').innerHTML=`<h3>Ce que Kopi a compris de ta vidéo</h3>${B.resume?`<p>${esc(B.resume)}</p>`:''}${B.angle?`<p><b>Angle qui fait cliquer :</b> ${esc(B.angle)}</p>`:''}
+    ${(B.textes||[]).length?`<div><b>Autres textes possibles</b> <small class="hint">(ouvre « Modifier le texte » puis clique dessus)</small><div class="thsug">${B.textes.map((t,i)=>`<span>${esc(t)}</span>`).join(' · ')}</div></div>`:''}
+    ${(B.titres_youtube||[]).length?`<div><b>Titres YouTube qui vont avec</b><ol class="thtitles">${B.titres_youtube.map(t=>`<li>${esc(t)} <button type="button" data-copy="${esc(t)}">Copier</button></li>`).join('')}</ol></div>`:''}`;
   const open=[...document.querySelectorAll('.thedit')].filter(e=>!e.hidden).map(e=>e.id);
   $('#thRes').innerHTML=(d.variants||[]).map((v,k)=>thCard(k,v,d.fmt)).join('');
   open.forEach(id=>{const e=document.getElementById(id);if(e)e.hidden=false});
@@ -1349,9 +1383,11 @@ function thWatch(id){
   };
   tick();thTimer=setInterval(tick,2500);
 }
+$('#thBrief').addEventListener('click',e=>{const c=e.target.closest('[data-copy]');if(c){navigator.clipboard&&navigator.clipboard.writeText(c.dataset.copy);c.textContent='Copié ✓';setTimeout(()=>c.textContent='Copier',1500)}});
 $('#thRes').addEventListener('click',async e=>{
   const ed=e.target.closest('[data-edit]'),re=e.target.closest('[data-redo]'),ap=e.target.closest('[data-apply]');
   if(ed){const b=$('#thEd'+ed.dataset.edit);b.hidden=!b.hidden;return}
+  const sg=e.target.closest('[data-sug]');if(sg){const box=$('#thEd'+sg.dataset.sug);box.querySelector('[data-f="texte"]').value=sg.dataset.t;box.querySelector('[data-f="mot_fort"]').value=sg.dataset.m;box.querySelector('[data-apply]').click();return}
   if(re){re.disabled=true;re.textContent='Nouvelle image…';await fetch(`/api/thumb/${thJob}/${re.dataset.redo}/redo`,{method:'POST'});thLast=null;if(!thTimer)thWatch(thJob);return}
   if(ap){const k=ap.dataset.apply,box=$('#thEd'+k),body={};
     box.querySelectorAll('[data-f]').forEach(x=>body[x.dataset.f]=x.type==='checkbox'?x.checked:x.value);

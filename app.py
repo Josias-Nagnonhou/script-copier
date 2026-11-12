@@ -1294,6 +1294,93 @@ def thumb_analyse_ref(path):
         '"pourquoi_ca_marche": "1 phrase en français"}'))
 
 
+def doc_text(path):
+    """Texte d'un script importé : PDF, Word, TXT, SRT…"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+            return "\n".join((p.extract_text() or "") for p in PdfReader(path).pages[:60])
+        except Exception:
+            return ""
+    if ext in (".docx", ".docm"):
+        try:
+            d = Document(path)
+            parts = [p.text for p in d.paragraphs]
+            for t in d.tables:
+                for row in t.rows:
+                    parts += [c.text for c in row.cells]
+            return "\n".join(parts)
+        except Exception:
+            return ""
+    try:
+        raw = open(path, "rb").read()
+        txt = raw.decode("utf-8", errors="ignore")
+        if ext in (".srt", ".vtt"):  # on enlève numéros et minutages des sous-titres
+            txt = "\n".join(l for l in txt.splitlines()
+                            if l.strip() and not re.match(r"^(\d+|WEBVTT|[\d:.,]+ --> [\d:.,]+.*)$", l.strip()))
+        return txt
+    except Exception:
+        return ""
+
+
+def thumb_transcribe(job, src):
+    """Transcrit l'audio de la vidéo (les 30 premières minutes suffisent pour une miniature)."""
+    tmp = os.path.join(job["dir"], "audio")
+    os.makedirs(tmp, exist_ok=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k",
+                    "-t", "1800", "-f", "segment", "-segment_time", "600", os.path.join(tmp, "part_%03d.mp3")],
+                   capture_output=True, text=True)
+    parts = sorted(glob.glob(os.path.join(tmp, "part_*.mp3")))
+    if not parts:
+        raise RuntimeError("Impossible de lire le son de ce fichier. Vérifie que c'est bien un audio ou une vidéo.")
+    texts = []
+    for i, p in enumerate(parts, 1):
+        job["step"] = f"Écoute de ta vidéo · partie {i}/{len(parts)}…"
+        t = groq_transcribe(p, "")
+        if t:
+            texts.append(t)
+    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        os.remove(src)
+    except OSError:
+        pass
+    return " ".join(texts).strip()
+
+
+def thumb_brief(job, script):
+    """Lit le script comme un stratège YouTube : l'angle qui fait cliquer, les mots, l'émotion, la scène."""
+    s = re.sub(r"\s+", " ", script).strip()
+    if len(s) > 14000:  # début (l'accroche) + extraits répartis dans toute la vidéo
+        step = (len(s) - 6000) // 8
+        s = s[:6000] + " […] " + " […] ".join(s[6000 + k * step: 6000 + k * step + 900] for k in range(8))
+    keys = ", ".join(TH.STYLES)
+    o = job["opts"]
+    prompt = (
+        "Tu es le meilleur stratège de miniatures YouTube (niveau MrBeast, Veritasium, Ali Abdaal) et tu connais "
+        "parfaitement le public africain francophone. Voici le script (ou la transcription) d'une vidéo.\n"
+        f"Niche indiquée : {o.get('niche') or 'à deviner'}. Sujet indiqué : {o.get('sujet') or 'à deviner'}.\n\n"
+        f"SCRIPT :\n{s}\n\n"
+        "Trouve ce qui fera cliquer : le moment le plus fort, la promesse, le mystère, le conflit, le chiffre "
+        "choquant, la transformation. La miniature doit COMPLÉTER le titre, créer une question dans la tête, "
+        "jamais résumer toute la vidéo ni mentir sur son contenu.\n"
+        "Réponds en JSON :\n"
+        "{\"resume\": \"la vidéo en 1 phrase\", \"angle\": \"l'angle le plus cliquable et pourquoi (1 phrase)\", "
+        "\"textes\": [\"5 propositions de texte de miniature, 2 à 5 mots, en français, percutantes, différentes "
+        "(choc, question, chiffre, mystère, avant/après), sans point final\"], "
+        "\"mots_forts\": [\"pour chaque texte, le ou les 1-2 mots à mettre en couleur\"], "
+        "\"badge\": \"étiquette courte optionnelle (ex. HISTOIRE VRAIE) ou vide\", "
+        f"\"style\": \"le plus adapté parmi : {keys}\", "
+        "\"emotion\": \"choc|colere|peur|serieux|joie|mystere|triste|confiant\", "
+        "\"niche\": \"la niche\", "
+        "\"scenes_en\": [\"4 idées de scène photo en ANGLAIS (décor, objets symboliques du sujet, ce que fait le "
+        "personnage, lumière), 40 mots max chacune, sans texte écrit dans l'image\"], "
+        "\"titres_youtube\": [\"3 titres YouTube accrocheurs qui vont avec la miniature\"]}")
+    out = parse_json_obj(groq_chat([{"role": "user", "content": prompt}], max_tokens=3000, json_mode=True,
+                                   tag="miniature"))
+    return out if isinstance(out, dict) else {}
+
+
 def thumb_plan(job, analysis):
     o = job["opts"]
     n = job["n"]
@@ -1303,6 +1390,8 @@ def thumb_plan(job, analysis):
         f"Niche : {o.get('niche') or 'non précisée'}\nSujet de la vidéo : {o.get('sujet') or user_text or 'non précisé'}\n"
         f"Style visuel : {TH.STYLES.get(job['style'], {}).get('label', job['style'])}\n"
         + (f"Analyse de la miniature modèle : {json.dumps(analysis, ensure_ascii=False)}\n" if analysis else "")
+        + (f"Analyse du script de la vidéo (à utiliser en priorité pour le texte et les scènes) : "
+           f"{json.dumps(job.get('brief'), ensure_ascii=False)[:3000]}\n" if job.get("brief") else "")
         + f"\nPropose {n} variantes DIFFÉRENTES (angle, décor, objets, cadrage) qui donnent très envie de cliquer.\n"
         "Pour chaque variante :\n"
         "- scene_en : description en ANGLAIS de la scène photo (décor, objets symboliques, lumière, cadrage, ce que fait "
@@ -1322,8 +1411,14 @@ def thumb_plan(job, analysis):
         print(f"[miniature {job['id']}] plan IA impossible : {str(e)[:120]}", flush=True)
         vs = []
     base_scene = (analysis or {}).get("scene_en") or f"scene about {o.get('sujet') or o.get('niche') or 'a dramatic story'}"
+    br = job.get("brief") or {}
+    bt, bm, bs = br.get("textes") or [], br.get("mots_forts") or [], br.get("scenes_en") or []
     while len(vs) < n:
-        vs.append({"scene_en": base_scene, "texte": user_text, "mot_fort": o.get("mot_fort", ""), "badge": o.get("badge", "")})
+        k = len(vs)
+        vs.append({"scene_en": bs[k] if k < len(bs) else base_scene,
+                   "texte": user_text or (bt[k] if k < len(bt) else ""),
+                   "mot_fort": o.get("mot_fort") or (bm[k] if k < len(bm) else ""),
+                   "badge": o.get("badge") or br.get("badge", "")})
     for v in vs:
         if user_text:
             v["texte"] = user_text
@@ -1331,6 +1426,8 @@ def thumb_plan(job, analysis):
             v["mot_fort"] = o["mot_fort"]
         if o.get("badge"):
             v["badge"] = o["badge"]
+        if not v.get("texte") and not o.get("sans_texte"):
+            v["texte"] = " ".join((o.get("sujet") or o.get("niche") or "").split()[:5])
         if o.get("sans_texte"):
             v["texte"], v["badge"] = "", ""
     return vs[:n]
@@ -1382,6 +1479,21 @@ def run_thumb_job(job):
     try:
         job["phase"] = "transcribing"
         analysis = {}
+        if job.get("audio"):
+            job["step"] = "Écoute de ta vidéo…"
+            job["script"] = (job.get("script", "") + " " + thumb_transcribe(job, job["audio"])).strip()
+        if job.get("script") and len(job["script"]) > 40:
+            job["step"] = "Analyse de ton script…"
+            try:
+                job["brief"] = thumb_brief(job, job["script"])
+                print(f"[miniature {job['id']}] script analysé : {len(job['script'])} caractères", flush=True)
+            except Exception as e:
+                print(f"[miniature {job['id']}] analyse du script impossible : {str(e)[:120]}", flush=True)
+            br = job.get("brief") or {}
+            if not job["opts"].get("niche") and br.get("niche"):
+                job["opts"]["niche"] = br["niche"]
+            if not job["opts"].get("sujet") and br.get("resume"):
+                job["opts"]["sujet"] = br["resume"]
         if job["ref"]:
             job["step"] = "Analyse de la miniature modèle…"
             analysis = thumb_analyse_ref(job["ref"]) or {}
@@ -1393,6 +1505,11 @@ def run_thumb_job(job):
             if job["pos"] == "auto" and analysis.get("position_texte") in ("left", "right", "top", "bottom") \
                     and job["fmt"] == "16:9":
                 job["pos"] = analysis["position_texte"]
+        br = job.get("brief") or {}
+        if job["style"] == "auto" and br.get("style") in TH.STYLES:
+            job["style"] = br["style"]
+        if job["emotion"] == "auto" and br.get("emotion") in TH.EMOTIONS:
+            job["emotion"] = br["emotion"]
         if job["style"] == "auto":
             job["style"] = {"Football": "foot", "Spiritualité chrétienne": "spirituel", "Islam": "spirituel",
                             "Mystère / ésotérisme": "mystere", "Business / argent": "argent", "Histoire": "histoire",
@@ -1502,12 +1619,31 @@ def start_thumb():
     except ValueError as e:
         shutil.rmtree(d, ignore_errors=True)
         return jsonify(error=str(e)), 400
+    script = (fo.get("script") or "").strip()[:200000]
+    audio_p = None
+    try:
+        sf = request.files.get("script_file")
+        if sf and sf.filename:
+            ext = os.path.splitext(sf.filename)[1].lower()
+            if ext in (".pdf", ".docx", ".docm", ".txt", ".md", ".srt", ".vtt", ".rtf"):
+                p_ = os.path.join(d, "script" + ext)
+                sf.save(p_)
+                txt = doc_text(p_)
+                if len(txt.strip()) < 30:
+                    raise ValueError("Je n'arrive pas à lire le texte de ce fichier. Copie-colle plutôt le script.")
+                script = (script + "\n" + txt).strip()
+            else:  # audio ou vidéo
+                audio_p = os.path.join(d, "audio" + (ext or ".bin"))
+                sf.save(audio_p)
+    except ValueError as e:
+        shutil.rmtree(d, ignore_errors=True)
+        return jsonify(error=str(e)), 400
     opts = {k: (fo.get(k) or "").strip()[:300] for k in (
         "niche", "sujet", "texte", "mot_fort", "badge", "police", "couleur", "accent", "fleche", "cercle",
         "style_mot", "taille", "africain", "sans_texte")}
-    if not (ref_p or opts["sujet"] or opts["texte"]):
+    if not (ref_p or opts["sujet"] or opts["texte"] or script or audio_p):
         shutil.rmtree(d, ignore_errors=True)
-        return jsonify(error="Donne au moins une miniature modèle, un sujet ou le texte de la miniature."), 400
+        return jsonify(error="Donne au moins un sujet, un script, l'audio de la vidéo ou une miniature modèle."), 400
     fmt = fo.get("format") if fo.get("format") in TH.FORMATS else "16:9"
     try:
         n = max(1, min(4, int(fo.get("n") or 2)))
@@ -1520,7 +1656,8 @@ def start_thumb():
            "style": fo.get("style") if fo.get("style") in TH.STYLES else "auto",
            "emotion": fo.get("emotion") if fo.get("emotion") in TH.EMOTIONS else "auto",
            "pos": fo.get("position") if fo.get("position") in ("left", "right", "top", "bottom") else "auto",
-           "quality": "qualite" if fo.get("qualite") == "qualite" else "rapide", "variants": []}
+           "quality": "qualite" if fo.get("qualite") == "qualite" else "rapide", "variants": [],
+           "script": script, "audio": audio_p}
     with LOCK:
         JOBS[jid] = job
     threading.Thread(target=run_thumb_job, args=(job,), daemon=True).start()
@@ -1541,6 +1678,8 @@ def thumb_job_status(jid):
         return jsonify(error="Création introuvable (le serveur a peut-être redémarré)."), 404
     return jsonify(phase=j["phase"], error=j["error"], step=j.get("step"), pct=j.get("pct", 0), fmt=j["fmt"],
                    style=j["style"], analysis=(j.get("analysis") or {}).get("pourquoi_ca_marche", ""),
+                   brief={k: (j.get("brief") or {}).get(k) for k in ("resume", "angle", "textes", "mots_forts", "titres_youtube")}
+                   if j.get("brief") else None,
                    variants=[{"status": v["status"], "error": v.get("error", ""), "ver": v.get("ver", 0),
                               "spec": v["spec"], "busy": v.get("busy", False)} for v in j.get("variants", [])])
 
@@ -4709,7 +4848,7 @@ def _keepalive():
     url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kopi-x5eh.onrender.com").rstrip("/") + "/ping"
     while True:
         time.sleep(240)
-        busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
+        busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean", "thumb", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
                    for j in list(JOBS.values()))
         if busy:
             try:

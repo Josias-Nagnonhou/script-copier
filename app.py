@@ -528,7 +528,7 @@ def cleanup():
     with LOCK:
         for jid in list(JOBS):
             j = JOBS[jid]
-            keep = {"download": 2, "media": 2, "clip": 3, "montage": 3, "thumb": 12}.get(j["platform"], 6) * 3600
+            keep = {"download": 2, "media": 2, "clip": 3, "montage": 3, "thumb": 12, "dub": 24}.get(j["platform"], 6) * 3600
             if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
@@ -3674,6 +3674,306 @@ def job_audio_file(jid, kind):
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
+# ------------------------------------------------ doublage : regarder une vidéo étrangère en français
+DUB_VOICES = {"henri": "fr-FR-HenriNeural", "denise": "fr-FR-DeniseNeural", "remy": "fr-FR-RemyMultilingualNeural",
+              "vivienne": "fr-FR-VivienneMultilingualNeural", "antoine": "fr-CA-AntoineNeural",
+              "sylvie": "fr-CA-SylvieNeural", "gerard": "fr-BE-GerardNeural", "ariane": "fr-CH-ArianeNeural"}
+DUB_CPS = 14.5          # caractères lus par seconde à vitesse normale (voix Edge en français)
+DUB_MAX_S = 3 * 3600
+
+
+def yt_video_id(url):
+    m = re.search(r"(?:v=|youtu\.be/|shorts/|embed/|live/)([A-Za-z0-9_-]{11})", url or "")
+    return m.group(1) if m else ""
+
+
+def dub_segments(words):
+    """Phrases de 2,5 à 12 s qui finissent sur une pause ou une fin de phrase (une voix = une phrase)."""
+    if not words:
+        return []
+    ends = sentence_ends(words)
+    segs, i = [], 0
+    for k, w in enumerate(words):
+        dur = w[1] - words[i][0]
+        gap = words[k + 1][0] - w[1] if k + 1 < len(words) else 99
+        if (ends[k] and dur >= 2.5) or (dur >= 9 and gap >= 0.2) or dur >= 13 or k == len(words) - 1:
+            segs.append({"s": round(words[i][0], 2), "e": round(w[1], 2),
+                         "src": " ".join(x[2] for x in words[i:k + 1])})
+            i = k + 1
+    for n, sg in enumerate(segs):  # place disponible pour la voix : jusqu'à la phrase suivante
+        nxt = segs[n + 1]["s"] if n + 1 < len(segs) else sg["e"] + 1.5
+        sg["slot"] = round(max(sg["e"] - sg["s"], min(nxt - sg["s"], sg["e"] - sg["s"] + 1.2)), 2)
+        sg["n"] = n
+    return segs
+
+
+def dub_translate(job, batch, prev):
+    """Traduction naturelle, à dire à voix haute, qui tient dans le temps de chaque phrase."""
+    items = [{"i": sg["n"], "texte": sg["src"], "max_caracteres": int(sg["slot"] * DUB_CPS * 1.05)} for sg in batch]
+    ctx = " ".join(p["src"] for p in prev[-3:])
+    prompt = (
+        "Tu fais le doublage français d'une vidéo (tutoriel, cours, conférence…). On te donne des phrases parlées, dans "
+        "l'ordre, avec un nombre maximum de caractères pour chacune (c'est le temps disponible pour la voix).\n"
+        "Traduis chaque phrase en français parlé, naturel et clair, comme un bon doubleur : tutoiement si l'orateur "
+        "parle à « you » de façon familière, sinon vouvoiement ; garde les termes techniques, noms de logiciels, de "
+        "boutons, de menus et de fonctions tels qu'ils apparaissent à l'écran (ex. « clique sur Settings ») ; "
+        "chiffres en chiffres. Respecte le maximum de caractères : si besoin, raccourcis sans perdre le sens "
+        "(enlève les répétitions, « euh », « you know », « basically »). Les phrases peuvent être coupées au milieu : "
+        "traduis le morceau tel quel pour que l'enchaînement reste fluide. Ne fusionne jamais deux numéros.\n"
+        + (f"Contexte juste avant : « {ctx} »\n" if ctx else "")
+        + f"Titre de la vidéo : {job.get('title', '')}\n"
+        + "Phrases : " + json.dumps(items, ensure_ascii=False)
+        + '\nRéponds en JSON : {"fr": [{"i": 0, "t": "traduction"}]}')
+    out = {}
+    for attempt in range(2):
+        try:
+            res = parse_json_obj(groq_chat([{"role": "user", "content": prompt}], max_tokens=6000, json_mode=True,
+                                           tag="doublage"))
+            out = {int(x["i"]): str(x.get("t") or "").strip() for x in res.get("fr") or [] if "i" in x}
+            if len(out) >= len(batch) * .8:
+                break
+        except Exception as e:
+            print(f"[doublage {job['id']}] traduction : {str(e)[:120]}", flush=True)
+            time.sleep(3)
+    for sg in batch:
+        sg["fr"] = out.get(sg["n"]) or ""
+
+
+def dub_voice(job, sg):
+    """Voix française d'une phrase, à la bonne vitesse pour rester synchronisée."""
+    txt = re.sub(r"\s+", " ", sg.get("fr") or "").strip()
+    if not txt or not re.search(r"\w", txt):
+        sg["ready"], sg["dur"] = True, 0
+        return
+    path = os.path.join(job["dir"], f"seg_{sg['n']:05d}.mp3")
+    need = len(txt) / DUB_CPS / max(sg["slot"], .6)
+    rate = int(max(0, min(60, (need - 1) * 100 + 4)))
+    for attempt in range(2):
+        tts_to_file(txt, job["voice_id"], path, rate=f"+{rate}%")
+        dur = probe_duration(path) or 0
+        if dur <= sg["slot"] * 1.08 or rate >= 85:
+            break
+        rate = int(min(85, (dur / sg["slot"] * (100 + rate)) - 100 + 6))
+    sg["dur"], sg["rate"], sg["ready"] = round(dur, 2), rate, True
+
+
+def run_dub_job(job):
+    print(f"[doublage {job['id']}] {job['url']} · voix {job['voice']}", flush=True)
+    tmp = os.path.join(job["dir"], "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    try:
+        job["phase"] = "transcribing"
+        job["step"] = "Lecture de la vidéo…"
+        with yt_dlp.YoutubeDL(ydl_opts(job["site"], skip_download=True)) as y:
+            info = y.extract_info(job["url"], download=False)
+        job["title"] = (info.get("title") or "")[:200]
+        job["source_name"] = job["title"] or job["url"]
+        job["duration"] = info.get("duration") or 0
+        if job["duration"] and job["duration"] > DUB_MAX_S:
+            raise RuntimeError("Vidéo trop longue : 3 heures maximum.")
+        job["vid"] = yt_video_id(info.get("webpage_url") or job["url"]) if job["site"] == "youtube" else ""
+        lang = (info.get("language") or "").split("-")[0]
+        if lang == "fr":
+            raise RuntimeError("Cette vidéo est déjà en français.")
+        job["step"] = "Récupération de ce qui est dit (sous-titres ou IA)…"
+        tj = {"id": job["id"], "site": job["site"], "lang": "", "url": job["url"], "msg": ""}
+        words = clip_transcript(tj, info, tmp)
+        job["method"] = tj.get("method", "")
+        segs = dub_segments(words)
+        if not segs:
+            raise RuntimeError("Aucune parole trouvée dans cette vidéo.")
+        job["segs"] = segs
+        print(f"[doublage {job['id']}] {len(segs)} phrases ({job['method']})", flush=True)
+        B = 25
+        for b0 in range(0, len(segs), B):
+            batch = segs[b0:b0 + B]
+            job["step"] = f"Traduction et voix française… {min(len(segs), b0 + B)}/{len(segs)} phrases"
+            dub_translate(job, batch, segs[max(0, b0 - 3):b0])
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                list(ex.map(lambda sg: dub_voice(job, sg), batch))
+            job["pct"] = round(5 + 95 * min(len(segs), b0 + B) / len(segs), 1)
+            if job.get("cancel"):
+                raise RuntimeError("annulé")
+        job["phase"], job["step"], job["pct"] = "done", "", 100
+        print(f"[doublage {job['id']}] terminé", flush=True)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        job["phase"], job["error"] = "error", ("Doublage annulé." if msg == "annulé" else msg[:300])
+        print(f"[doublage {job['id']}] erreur : {msg[:200]}", flush=True)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        job["finished"] = time.time()
+
+
+@app.post("/api/dub")
+def start_dub():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if not GROQ_KEY:
+        return jsonify(error="La clé Groq n'est pas configurée."), 500
+    d = request.get_json(force=True, silent=True) or {}
+    url = (d.get("url") or "").strip()
+    if not re.match(r"https?://", url):
+        return jsonify(error="Colle le lien de la vidéo (YouTube, TikTok, Facebook…)."), 400
+    voice = d.get("voice") if d.get("voice") in DUB_VOICES else "henri"
+    cleanup()
+    # même vidéo et même voix déjà prête ou en cours : on la rouvre directement
+    for j in JOBS.values():
+        if j["platform"] == "dub" and j.get("url") == url and j.get("voice") == voice and j["phase"] != "error":
+            return jsonify(job_id=j["id"])
+    if sum(1 for j in JOBS.values() if j["platform"] == "dub" and not j.get("finished")) >= 2:
+        return jsonify(error="Deux doublages sont déjà en cours. Attends que l'un se termine."), 409
+    jid = uuid.uuid4().hex[:12]
+    dd = os.path.join(BASE, "d_" + jid)
+    os.makedirs(dd, exist_ok=True)
+    site = "youtube" if re.search(r"youtu\.?be", url) else "tiktok" if "tiktok" in url else \
+        "facebook" if re.search(r"facebook|fb\.watch", url) else "other"
+    job = {"id": jid, "platform": "dub", "source": url, "source_name": url, "url": url, "site": site, "limit": 0,
+           "sort": "", "lang": "", "phase": "queued", "items": [], "error": "", "created": time.time(),
+           "step": "Préparation…", "pct": 2, "dir": dd, "voice": voice, "voice_id": DUB_VOICES[voice], "segs": []}
+    with LOCK:
+        JOBS[jid] = job
+    threading.Thread(target=run_dub_job, args=(job,), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+@app.get("/api/dub/<jid>")
+def dub_status(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "dub":
+        return jsonify(error="Doublage introuvable (le serveur a peut-être redémarré). Recolle le lien."), 404
+    since = request.args.get("since", type=int) or 0
+    segs = j.get("segs") or []
+    return jsonify(phase=j["phase"], error=j["error"], step=j.get("step"), pct=j.get("pct", 0), title=j.get("title", ""),
+                   vid=j.get("vid", ""), site=j["site"], url=j["url"], voice=j["voice"], method=j.get("method", ""),
+                   total=len(segs), ready=sum(1 for s in segs if s.get("ready")), video=j.get("video_state", ""),
+                   export=j.get("export_state", ""), export_step=j.get("export_step", ""),
+                   segs=[{k: sg.get(k) for k in ("n", "s", "e", "slot", "src", "fr", "dur", "ready")} for sg in segs[since:]])
+
+
+@app.get("/api/dub/<jid>/seg/<int:n>")
+def dub_seg(jid, n):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid) or {}
+    p = os.path.join(j.get("dir", ""), f"seg_{n:05d}.mp3")
+    if not j or not os.path.exists(p):
+        return "", 404
+    return send_file(p, mimetype="audio/mpeg", max_age=86400)
+
+
+def dub_track(job, out_mp3, orig_media=None, orig_vol=0.15):
+    """Piste française complète (par blocs de 10 min pour rester léger), avec le son d'origine baissé en option."""
+    import numpy as np
+    sr = 24000
+    segs = [s for s in job["segs"] if s.get("dur")]
+    total = max([job.get("duration") or 0] + [s["s"] + s["dur"] + .5 for s in segs])
+    tmp = os.path.join(job["dir"], "track")
+    os.makedirs(tmp, exist_ok=True)
+    block, parts = 600, []
+    for b, t0 in enumerate(range(0, int(total) + 1, block)):
+        n = int(min(block, total - t0 + 1) * sr)
+        if n <= 0:
+            break
+        buf = np.zeros(n, dtype=np.float32)
+        for sg in segs:
+            a = sg["s"] - t0
+            if a + sg["dur"] < 0 or a >= block:
+                continue
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-i", os.path.join(job["dir"], f"seg_{sg['n']:05d}.mp3"),
+                                  "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"], capture_output=True).stdout
+            x = np.frombuffer(raw, dtype=np.float32)
+            i0 = int(a * sr)
+            lo, hi = max(0, i0), min(n, i0 + len(x))
+            if hi > lo:
+                buf[lo:hi] += x[lo - i0:hi - i0]
+        wav = os.path.join(tmp, f"p{b:03d}.wav")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "-",
+                        "-c:a", "pcm_s16le", wav], input=np.clip(buf, -1, 1).tobytes(), check=True)
+        parts.append(wav)
+        job["export_step"] = f"Voix française : {min(100, int((t0 + block) / max(total, 1) * 100))} %"
+    lst = os.path.join(tmp, "l.txt")
+    open(lst, "w").write("".join(f"file '{p}'\n" for p in parts))
+    voice_wav = os.path.join(tmp, "voix.wav")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", voice_wav],
+                   check=True)
+    if orig_media:
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice_wav, "-i", orig_media, "-filter_complex",
+                        f"[1:a]volume={orig_vol},aresample=24000[o];[0:a][o]amix=inputs=2:duration=longest:normalize=0[a]",
+                        "-map", "[a]", "-c:a", "libmp3lame", "-b:a", "160k", out_mp3], check=True)
+    else:
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice_wav, "-c:a", "libmp3lame", "-b:a", "128k", out_mp3],
+                       check=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def run_dub_export(job, kind):
+    try:
+        job["export_state"], job["export_step"] = "working", "Préparation…"
+        base = safe_name(job.get("title") or "video", 60)
+        if kind == "mp3":
+            out = os.path.join(job["dir"], f"{base} - voix française.mp3")
+            dub_track(job, out)
+            job["export_mp3"] = out
+        else:
+            job["export_step"] = "Téléchargement de la vidéo…"
+            vdir = os.path.join(job["dir"], "v")
+            os.makedirs(vdir, exist_ok=True)
+            with yt_dlp.YoutubeDL(ydl_opts(job["site"], format="best[height<=720][ext=mp4]/best[height<=720]/best",
+                                           outtmpl=os.path.join(vdir, "src.%(ext)s"))) as y:
+                y.extract_info(job["url"], download=True)
+            media = [p for p in glob.glob(os.path.join(vdir, "src.*")) if not p.endswith(".part")]
+            if not media:
+                raise RuntimeError("Téléchargement de la vidéo impossible.")
+            track = os.path.join(vdir, "piste.mp3")
+            dub_track(job, track, orig_media=media[0], orig_vol=job.get("orig_vol", .15))
+            job["export_step"] = "Assemblage de la vidéo…"
+            out = os.path.join(job["dir"], f"{base} - en français.mp4")
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", media[0], "-i", track, "-map", "0:v:0", "-map", "1:a:0",
+                            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", out],
+                           check=True)
+            shutil.rmtree(vdir, ignore_errors=True)
+            job["export_mp4"] = out
+        job["export_state"], job["export_step"] = "done", ""
+    except Exception as e:
+        job["export_state"], job["export_step"] = "error", f"Export impossible : {str(e)[:200]}"
+        print(f"[doublage {job['id']}] export {kind} : {str(e)[:200]}", flush=True)
+    job["finished"] = time.time()
+
+
+@app.post("/api/dub/<jid>/export")
+def dub_export(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "dub" or j["phase"] != "done":
+        return jsonify(error="Le doublage doit être terminé avant l'export."), 400
+    if j.get("export_state") == "working":
+        return jsonify(ok=True)
+    d = request.get_json(force=True, silent=True) or {}
+    kind = "mp3" if d.get("kind") == "mp3" else "mp4"
+    try:
+        j["orig_vol"] = max(0, min(1, float(d.get("orig_vol", .15))))
+    except (TypeError, ValueError):
+        j["orig_vol"] = .15
+    j["export_kind"] = kind
+    threading.Thread(target=run_dub_export, args=(j, kind), daemon=True).start()
+    return jsonify(ok=True)
+
+
+@app.get("/api/dub/<jid>/file/<kind>")
+def dub_file(jid, kind):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid) or {}
+    p = j.get("export_mp3" if kind == "mp3" else "export_mp4")
+    if not p or not os.path.exists(p):
+        return "Fichier introuvable (le serveur a peut-être redémarré).", 404
+    return send_file(p, as_attachment=True, download_name=os.path.basename(p))
+
+
 # ------------------------------------------------ nettoyage audio (retirer la musique, garder la voix)
 import voiceclean as VC
 
@@ -4902,8 +5202,8 @@ def _keepalive():
     url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kopi-x5eh.onrender.com").rstrip("/") + "/ping"
     while True:
         time.sleep(240)
-        busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean", "thumb", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
-                   for j in list(JOBS.values()))
+        busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean", "thumb", "dub", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
+                   for j in list(JOBS.values())) or any(j.get("export_state") == "working" for j in list(JOBS.values()))
         if busy:
             try:
                 requests.get(url, timeout=20)

@@ -295,6 +295,25 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .fbst{font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:#fde8e6;color:#b42318}
 .fbst.ok{background:#e6f6ec;color:#167a3c}
 #fbConn.ok .steps,#fbConn.ok .hint{display:none}
+.dbframe [hidden],.dbwatch[hidden],.dbst[hidden]{display:none!important}
+.dbst{margin-top:12px}.dbst small{opacity:.8}
+.dbwatch{margin-top:16px}.dbwatch h2{margin:0 0 10px;font:800 18px var(--display)}
+.dbstage{display:grid;gap:10px}
+.dbframe{position:relative;aspect-ratio:16/9;background:#000;border-radius:16px;overflow:hidden}
+.dbframe iframe,#dbPlayer{position:absolute;inset:0;width:100%;height:100%}
+.dbstart{position:absolute;inset:0;margin:auto;width:max-content;height:max-content;border:0;border-radius:99px;padding:16px 26px;background:#fff;color:#111;font:800 17px var(--body);display:flex;gap:10px;align-items:center;cursor:pointer;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.dbstart span{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#e8473b;color:#fff;font-size:14px}
+.dbwait{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:8px 14px;border-radius:99px;font-weight:700;font-size:14px}
+.dbsub{min-height:64px;background:var(--soft);border-radius:14px;padding:10px 14px;text-align:center}
+.dbsub .fr{font:700 18px/1.35 var(--body)}.dbsub .or{font-size:13px;color:var(--muted);margin-top:4px}
+.dbctl{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-top:12px;font-size:14px}
+.dbctl input[type=range]{width:120px;vertical-align:middle;padding:0}
+.dbexp{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.dbtr{margin-top:12px;border:1px solid var(--line);border-radius:14px;padding:10px 14px}.dbtr summary{cursor:pointer;font-weight:800}
+#dbList{max-height:420px;overflow:auto;margin-top:8px;display:grid;gap:2px}
+#dbList button{display:grid;grid-template-columns:56px 1fr;gap:8px;text-align:left;border:0;background:none;color:var(--ink);padding:6px 8px;border-radius:10px;cursor:pointer;font:500 14px/1.4 var(--body)}
+#dbList button:hover{background:var(--soft)}#dbList button.on{background:var(--soft);font-weight:700}
+#dbList time{color:var(--muted);font-variant-numeric:tabular-nums}#dbList .np{opacity:.45}
 .thgrid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
 @media (max-width:860px){.thgrid{grid-template-columns:1fr}}
 .thtwo{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media (max-width:560px){.thtwo{grid-template-columns:1fr}}
@@ -384,6 +403,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <button role="tab" id="tabFile" aria-selected="false" aria-controls="modeFile" title="Transcrire un fichier audio ou vidéo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M18.5 10.5a6.5 6.5 0 0 1-13 0M12 17v4M8.5 21h7"/></svg><span>Transcrire</span></button>
     <button role="tab" id="tabNet" aria-selected="false" aria-controls="modeNet" title="Retirer la musique de fond et garder la voix"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 9v6"/><path d="m17.5 5.5 1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/></svg><span>Nettoyer</span></button>
     <button role="tab" id="tabDl" aria-selected="false" aria-controls="modeDl" title="Télécharger les vidéos TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5M5 20.5h14"/></svg><span>TikTok</span></button>
+    <button role="tab" id="tabDb" aria-selected="false" aria-controls="modeDb" title="Regarder une vidéo étrangère doublée en français"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="11" rx="2"/><path d="m16 9 5-3v10l-5-3"/><path d="M6 19h7"/></svg><span>Doubler</span></button>
     <button role="tab" id="tabTr" aria-selected="false" aria-controls="modeTr" title="Traduire un texte"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9M8.5 3v2M6 5c.6 3.4 2.8 6 6 7.5M11 5c-.7 3.6-3.2 6.6-6.5 8"/><path d="m12.5 21 4-9 4 9M14 17.5h5"/></svg><span>Traduire</span></button>
     <button role="tab" id="tabMd" aria-selected="false" aria-controls="modeMd" title="Photos et médias d'un post X ou TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="m21 16-4.5-4.5L7 21"/></svg><span>Photos</span></button>
     <button role="tab" id="tabAu" aria-selected="false" aria-controls="modeAu" title="Analyser ton audience et savoir quoi lui vendre"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5h18M6 16.5V12M10.5 16.5V8M15 16.5v-5M19.5 16.5V5"/></svg><span>Monétiser</span></button>
@@ -924,6 +944,40 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     </section>
   </div>
 
+  <div id="modeDb" role="tabpanel" hidden>
+    <h1>Regarde n'importe quelle vidéo<br><span>en français</span>.</h1>
+    <section class="tile">
+      <label for="dbUrl">Lien de la vidéo (YouTube, en anglais ou toute autre langue)</label>
+      <div class="kline"><input id="dbUrl" type="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+        <select id="dbVoice" aria-label="Voix française"><option value="henri">Voix d'homme · Henri (France)</option><option value="denise">Voix de femme · Denise (France)</option><option value="remy">Voix d'homme · Rémy (très naturelle)</option><option value="vivienne">Voix de femme · Vivienne (très naturelle)</option><option value="antoine">Voix d'homme · Antoine (Québec)</option><option value="sylvie">Voix de femme · Sylvie (Québec)</option><option value="gerard">Voix d'homme · Gérard (Belgique)</option><option value="ariane">Voix de femme · Ariane (Suisse)</option></select></div>
+      <button class="go" id="dbGo">Traduire en français →</button>
+      <p class="hint">Kopi récupère ce qui est dit (sous-titres de la vidéo, sinon l'IA écoute), le traduit en français parlé, puis une voix Microsoft gratuite le lit en même temps que l'image. Tu peux commencer à regarder dès que la première minute est prête.</p>
+      <div class="dbst" id="dbSt" hidden><div class="bar live" id="dbBar"><i id="dbFill"></i></div><small id="dbStep"></small></div>
+    </section>
+    <section class="tile dbwatch" id="dbWatch" hidden>
+      <h2 id="dbTitle"></h2>
+      <div class="dbstage">
+        <div class="dbframe"><div id="dbPlayer"></div>
+          <button class="dbstart" id="dbStart" type="button"><span>▶</span>Regarder en français</button>
+          <div class="dbwait" id="dbWait" hidden>Voix française en préparation…</div>
+        </div>
+        <div class="dbsub" id="dbSub"><div class="fr" id="dbSubFr"></div><div class="or" id="dbSubOr"></div></div>
+      </div>
+      <div class="dbctl">
+        <label>Son d'origine <input type="range" id="dbOrig" min="0" max="100" value="12"></label>
+        <label>Voix française <input type="range" id="dbVol" min="0" max="100" value="100"></label>
+        <label class="check"><input type="checkbox" id="dbShowFr" checked>Sous-titres français</label>
+        <label class="check"><input type="checkbox" id="dbShowOr">Texte original</label>
+      </div>
+      <div class="dbexp">
+        <button class="btn dl" id="dbMp4" type="button">Télécharger la vidéo en français (MP4)</button>
+        <button class="btn" id="dbMp3" type="button">Télécharger seulement la voix (MP3)</button>
+        <span class="hint" id="dbExpSt"></span>
+      </div>
+      <details class="dbtr"><summary>Texte complet (clique sur une phrase pour y aller)</summary><div id="dbList"></div></details>
+    </section>
+  </div>
+
   <div id="modeFile" role="tabpanel" hidden>
     <h1>Importe un audio.<br>Récupère <span>le texte complet</span>.</h1>
     <div class="bento">
@@ -1069,7 +1123,7 @@ $('#fbFile').onchange=e=>{if(e.target.files[0])fbSend(e.target.files[0])};
 $('#fbDrop').addEventListener('drop',e=>{if(e.dataTransfer.files[0])fbSend(e.dataTransfer.files[0])});
 fbEnsure();
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],th:['#tabTh','#modeTh'],cl:['#tabCl','#modeCl'],mo:['#tabMo','#modeMo'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
+const MODES={acc:['#tabAcc','#modeAcc'],db:['#tabDb','#modeDb'],th:['#tabTh','#modeTh'],cl:['#tabCl','#modeCl'],mo:['#tabMo','#modeMo'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -1406,6 +1460,98 @@ $('#thRes').addEventListener('click',async e=>{
 });
 thInit();
 try{const j=localStorage.getItem('thumbJob');if(j)thWatch(j)}catch(e){}
+
+
+/* ---------- doublage ---------- */
+let dbJob=null,dbSegs=[],dbDone=false,dbTimer=null,dbPlayerYT=null,dbTick=null,dbCur=-1,dbWaiting=false,dbStarted=false;
+const dbA=new Audio();dbA.preload='auto';
+const fmtT=t=>{t=Math.max(0,Math.floor(t));const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
+function dbStep(txt,p){$('#dbSt').hidden=false;$('#dbStep').textContent=txt;$('#dbFill').style.width=(p||3)+'%'}
+$('#dbGo').onclick=async()=>{
+  const url=$('#dbUrl').value.trim();if(!url){dbStep('Colle d\'abord le lien de la vidéo.',0);return}
+  $('#dbGo').classList.add('busy');dbStep('Démarrage…',2);
+  try{const r=await fetch('/api/dub',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,voice:$('#dbVoice').value})});const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Erreur');try{localStorage.setItem('dubJob',d.job_id)}catch(_){}dbOpen(d.job_id)}
+  catch(e){dbStep(e.message,0);$('#dbGo').classList.remove('busy')}
+};
+function dbOpen(id){
+  if(dbJob!==id){dbJob=id;dbSegs=[];dbDone=false;dbCur=-1;dbStarted=false;$('#dbList').innerHTML='';if(dbPlayerYT){try{dbPlayerYT.destroy()}catch(e){}dbPlayerYT=null}}
+  clearInterval(dbTimer);dbPoll();dbTimer=setInterval(dbPoll,3000);
+}
+async function dbPoll(){
+  let since=0;while(since<dbSegs.length&&dbSegs[since].ready)since++;
+  let d;try{const r=await fetch(`/api/dub/${dbJob}?since=${since}`);d=await r.json();if(!r.ok)throw d}
+  catch(e){clearInterval(dbTimer);dbStep((e&&e.error)||'Connexion perdue',0);$('#dbGo').classList.remove('busy');return}
+  for(const sg of d.segs||[])dbSegs[sg.n]=sg;
+  if(d.title)$('#dbTitle').textContent=d.title;
+  if(d.phase==='error'){clearInterval(dbTimer);dbStep(d.error,0);$('#dbGo').classList.remove('busy');return}
+  if(d.phase==='done'){dbDone=true;clearInterval(dbTimer);$('#dbGo').classList.remove('busy');
+    $('#dbSt').hidden=false;$('#dbFill').style.width='100%';$('#dbBar').classList.remove('live');$('#dbStep').textContent=`Prêt ✓ ${d.total} phrases traduites`+(d.method?` (${d.method==='IA'?'écoute par l\'IA':'sous-titres de la vidéo'})`:'');}
+  else dbStep(d.step||'Préparation…',d.pct);
+  dbExpShow(d);
+  if(d.total&&!$('#dbWatch').dataset.ok){
+    if(d.site==='youtube'&&d.vid){$('#dbWatch').hidden=false;$('#dbWatch').dataset.ok='1';dbMakePlayer(d.vid)}
+    else if(dbDone){$('#dbWatch').hidden=false;$('#dbWatch').dataset.ok='1';$('.dbstage').innerHTML='<p class="hint">Pour les vidéos TikTok ou Facebook, télécharge la vidéo en français (MP4) ci-dessous.</p>'}
+  }
+  dbRenderList();
+  if(dbExpTimer===null&&d.export==='working')dbExpWatch();
+}
+function dbRenderList(){
+  const box=$('#dbList');const have=box.children.length;
+  let html='';for(let k=have;k<dbSegs.length;k++){const sg=dbSegs[k];if(!sg)break;html+=`<button type="button" data-n="${k}" class="${sg.ready?'':'np'}"><time>${fmtT(sg.s)}</time><span>${esc(sg.fr||sg.src)}</span></button>`}
+  if(html)box.insertAdjacentHTML('beforeend',html);
+  [...box.children].forEach((b,k)=>{const sg=dbSegs[k];if(sg){b.classList.toggle('np',!sg.ready);if(sg.fr&&b.lastChild.textContent!==sg.fr)b.lastChild.textContent=sg.fr}});
+}
+$('#dbList').addEventListener('click',e=>{const b=e.target.closest('button[data-n]');if(!b||!dbPlayerYT)return;dbPlayerYT.seekTo(dbSegs[+b.dataset.n].s,true);dbPlayerYT.playVideo()});
+function dbLoadYT(cb){if(window.YT&&YT.Player)return cb();window.onYouTubeIframeAPIReady=cb;if(!document.getElementById('ytapi')){const t=document.createElement('script');t.id='ytapi';t.src='https://www.youtube.com/iframe_api';document.head.appendChild(t)}}
+function dbMakePlayer(vid){
+  dbLoadYT(()=>{dbPlayerYT=new YT.Player('dbPlayer',{videoId:vid,playerVars:{rel:0,modestbranding:1,playsinline:1,cc_load_policy:0},
+    events:{onReady:()=>{dbPlayerYT.setVolume(+$('#dbOrig').value)},onError:e=>{if([2,5,100,101,150].includes(e.data)){$('#dbWait').hidden=false;$('#dbWait').textContent='Le propriétaire bloque la lecture hors de YouTube : télécharge la vidéo en français (MP4) ci-dessous.';$('#dbStart').hidden=true}}}});
+    clearInterval(dbTick);dbTick=setInterval(dbSync,100);});
+}
+$('#dbStart').onclick=()=>{
+  // débloque le son sur téléphone (un clic est nécessaire), puis lance la vidéo
+  dbA.src='data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQxAADB8AhSmxhIIEVCSiJrDCQBTcu3UrAIwUdkRgQbFAZC1CQEwTJ9mjRvBA4UOLD8nKVOWfh+UlK3z/177OXrfOdKl7pyn3Xf//WreyTRUoAWgBgkOAGbZHBgG1OF6zM82DWbZaUmMBptgQhGjsyYqc9ae9XFz280948NMBWInljyzsNRFLPWdnZGWrddDsjK1unuSrVN9jJsK8KuQtQCtMBjCEtImISdNKJOopIpBFpNSMbIHCSRpRR5iakjTiyzLhchUUBwCgyKiweBv/7UsQbg8isVNoMPMjAAAA0gAAABEVFGmgqK////9bP/6XCykxBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
+  dbA.play().then(()=>dbA.pause()).catch(()=>{});dbStarted=true;$('#dbStart').hidden=true;
+  if(dbPlayerYT&&dbPlayerYT.playVideo)dbPlayerYT.playVideo();
+};
+$('#dbOrig').oninput=()=>{if(dbPlayerYT&&dbPlayerYT.setVolume)dbPlayerYT.setVolume(+$('#dbOrig').value)};
+$('#dbVol').oninput=()=>{dbA.volume=+$('#dbVol').value/100};
+$('#dbShowFr').onchange=()=>$('#dbSubFr').hidden=!$('#dbShowFr').checked;
+$('#dbShowOr').onchange=()=>$('#dbSubOr').hidden=!$('#dbShowOr').checked;$('#dbSubOr').hidden=true;
+function dbFind(t){let lo=0,hi=dbSegs.length-1,ans=-1;while(lo<=hi){const m=(lo+hi)>>1;if(dbSegs[m]&&dbSegs[m].s<=t){ans=m;lo=m+1}else hi=m-1}
+  if(ans<0)return -1;const sg=dbSegs[ans];return t<sg.s+Math.max(sg.slot||0,sg.dur||0)+.25?ans:-1}
+let dbSubN=-2;
+function dbSync(){
+  const P=dbPlayerYT;if(!P||!P.getCurrentTime)return;
+  const t=P.getCurrentTime(),st=P.getPlayerState(),k=dbFind(t),sg=k>=0?dbSegs[k]:null;
+  if(k!==dbSubN){dbSubN=k;$('#dbSubFr').textContent=sg?(sg.fr||''):'';$('#dbSubOr').textContent=sg?sg.src:'';
+    const b=$('#dbList').children[k];[...$('#dbList').querySelectorAll('.on')].forEach(x=>x.classList.remove('on'));if(b){b.classList.add('on')}}
+  if(st===1&&!dbStarted){dbStarted=true;$('#dbStart').hidden=true}
+  if(dbWaiting){if(!sg||sg.ready){dbWaiting=false;$('#dbWait').hidden=true;P.playVideo()}return}
+  if(st!==1){if(!dbA.paused)dbA.pause();return}
+  if(!sg){if(!dbA.paused&&dbCur>=0&&t>dbSegs[dbCur].s+(dbSegs[dbCur].dur||0)/1+.5)dbA.pause();return}
+  if(!sg.ready){P.pauseVideo();dbWaiting=true;$('#dbWait').hidden=false;$('#dbWait').textContent='Voix française en préparation…';return}
+  if(!sg.dur){dbCur=k;return}
+  const rate=sg.dur>(sg.slot||sg.dur)?Math.min(1.25,sg.dur/sg.slot):1,want=(t-sg.s)*rate;
+  if(k!==dbCur){dbCur=k;if(want<sg.dur-.15){dbA.src=`/api/dub/${dbJob}/seg/${k}#t=${want.toFixed(2)}`;dbA.playbackRate=rate;dbA.preservesPitch=true;dbA.volume=+$('#dbVol').value/100;dbA.play().catch(()=>{});
+      for(const j of [k+1,k+2]){if(dbSegs[j]&&dbSegs[j].dur){const pre=new Audio();pre.preload='auto';pre.src=`/api/dub/${dbJob}/seg/${j}`}}}
+    return}
+  if(want<sg.dur-.1){if(dbA.paused&&!dbA.ended)dbA.play().catch(()=>{});else if(Math.abs(dbA.currentTime-want)>.6)dbA.currentTime=want}
+}
+let dbExpTimer=null;
+function dbExpShow(d){const st=$('#dbExpSt');
+  if(d.export==='working')st.textContent=d.export_step||'Préparation…';
+  else if(d.export==='error')st.textContent=d.export_step;
+  else if(d.export==='done'){st.innerHTML='Prêt ✓ <a class="btn dl" href="/api/dub/'+dbJob+'/file/'+(dbExpKind||'mp4')+'">Enregistrer le fichier</a>'}
+  $('#dbMp4').disabled=$('#dbMp3').disabled=!dbDone||d.export==='working'}
+let dbExpKind='mp4';
+async function dbExport(kind){dbExpKind=kind;$('#dbExpSt').textContent='Préparation…';
+  const r=await fetch(`/api/dub/${dbJob}/export`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,orig_vol:+$('#dbOrig').value/100})});
+  const d=await r.json();if(!r.ok){$('#dbExpSt').textContent=d.error;return}dbExpWatch()}
+function dbExpWatch(){clearInterval(dbExpTimer);dbExpTimer=setInterval(async()=>{const d=await (await fetch(`/api/dub/${dbJob}?since=99999`)).json();dbExpShow(d);if(d.export!=='working'){clearInterval(dbExpTimer);dbExpTimer=null}},3000)}
+$('#dbMp4').onclick=()=>dbExport('mp4');$('#dbMp3').onclick=()=>dbExport('mp3');
+try{const j=localStorage.getItem('dubJob');if(j)dbOpen(j)}catch(e){}
 
 /* ---------- monétisation ---------- */
 let aPlat='youtube',aLimit=40,aTimer=null,aBusy=false,aCur=null;

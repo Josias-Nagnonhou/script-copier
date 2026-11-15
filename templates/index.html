@@ -1515,19 +1515,29 @@ function dbMakePlayer(vid){
 $('#dbStart').onclick=()=>{
   // débloque le son sur téléphone (un clic est nécessaire), puis lance la vidéo
   dbA.src='data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQxAADB8AhSmxhIIEVCSiJrDCQBTcu3UrAIwUdkRgQbFAZC1CQEwTJ9mjRvBA4UOLD8nKVOWfh+UlK3z/177OXrfOdKl7pyn3Xf//WreyTRUoAWgBgkOAGbZHBgG1OF6zM82DWbZaUmMBptgQhGjsyYqc9ae9XFz280948NMBWInljyzsNRFLPWdnZGWrddDsjK1unuSrVN9jJsK8KuQtQCtMBjCEtImISdNKJOopIpBFpNSMbIHCSRpRR5iakjTiyzLhchUUBwCgyKiweBv/7UsQbg8isVNoMPMjAAAA0gAAABEVFGmgqK////9bP/6XCykxBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
-  dbA.play().then(()=>dbA.pause()).catch(()=>{});dbStarted=true;$('#dbStart').hidden=true;
+  dbA.play().then(()=>dbA.pause()).catch(()=>{});dbStarted=true;$('#dbStart').hidden=true;dbPrefetch(0);
   if(dbPlayerYT&&dbPlayerYT.playVideo)dbPlayerYT.playVideo();
 };
 $('#dbOrig').oninput=()=>{if(dbPlayerYT&&dbPlayerYT.setVolume)dbPlayerYT.setVolume(+$('#dbOrig').value)};
 $('#dbVol').oninput=()=>{dbA.volume=+$('#dbVol').value/100};
 $('#dbShowFr').onchange=()=>$('#dbSubFr').hidden=!$('#dbShowFr').checked;
 $('#dbShowOr').onchange=()=>$('#dbSubOr').hidden=!$('#dbShowOr').checked;$('#dbSubOr').hidden=true;
+// Les phrases suivantes sont téléchargées à l'avance : elles démarrent instantanément (pas d'attente réseau).
+const dbCache={},dbLoading={};
+function dbPrefetch(from){
+  let n=0;for(let k=Math.max(0,from);k<dbSegs.length&&n<8;k++){const sg=dbSegs[k];if(!sg)break;if(!sg.ready)break;if(!sg.dur)continue;n++;
+    if(dbCache[k]||dbLoading[k])continue;dbLoading[k]=1;
+    fetch(`/api/dub/${dbJob}/seg/${k}`).then(r=>r.ok?r.blob():null).then(b=>{if(b)dbCache[k]=URL.createObjectURL(b)}).catch(()=>{}).finally(()=>{delete dbLoading[k]})}
+  for(const k in dbCache){if(+k<from-3){URL.revokeObjectURL(dbCache[k]);delete dbCache[k]}}
+}
 function dbFind(t){let lo=0,hi=dbSegs.length-1,ans=-1;while(lo<=hi){const m=(lo+hi)>>1;if(dbSegs[m]&&dbSegs[m].s<=t){ans=m;lo=m+1}else hi=m-1}
   if(ans<0)return -1;const sg=dbSegs[ans];return t<sg.s+Math.max(sg.slot||0,sg.dur||0)+.25?ans:-1}
-let dbSubN=-2;
+let dbSubN=-2,dbPf=0;
+function dbFind2(t){let k=0;while(k<dbSegs.length&&dbSegs[k]&&dbSegs[k].s<t)k++;return k}
 function dbSync(){
   const P=dbPlayerYT;if(!P||!P.getCurrentTime)return;
-  const t=P.getCurrentTime(),st=P.getPlayerState(),k=dbFind(t),sg=k>=0?dbSegs[k]:null;
+  const t=P.getCurrentTime()+.12,st=P.getPlayerState(),k=dbFind(t),sg=k>=0?dbSegs[k]:null;
+  if(++dbPf%10===0)dbPrefetch(k>=0?k:dbFind2(t));
   if(k!==dbSubN){dbSubN=k;$('#dbSubFr').textContent=sg?(sg.fr||''):'';$('#dbSubOr').textContent=sg?sg.src:'';
     const b=$('#dbList').children[k];[...$('#dbList').querySelectorAll('.on')].forEach(x=>x.classList.remove('on'));if(b){b.classList.add('on')}}
   if(st===1&&!dbStarted){dbStarted=true;$('#dbStart').hidden=true}
@@ -1537,8 +1547,9 @@ function dbSync(){
   if(!sg.ready){P.pauseVideo();dbWaiting=true;$('#dbWait').hidden=false;$('#dbWait').textContent='Voix française en préparation…';return}
   if(!sg.dur){dbCur=k;return}
   const rate=sg.dur>(sg.slot||sg.dur)?Math.min(1.25,sg.dur/sg.slot):1,want=(t-sg.s)*rate;
-  if(k!==dbCur){dbCur=k;if(want<sg.dur-.15){dbA.src=`/api/dub/${dbJob}/seg/${k}#t=${want.toFixed(2)}`;dbA.playbackRate=rate;dbA.preservesPitch=true;dbA.volume=+$('#dbVol').value/100;dbA.play().catch(()=>{});
-      for(const j of [k+1,k+2]){if(dbSegs[j]&&dbSegs[j].dur){const pre=new Audio();pre.preload='auto';pre.src=`/api/dub/${dbJob}/seg/${j}`}}}
+  if(k!==dbCur){dbCur=k;if(want<sg.dur-.15){const c=dbCache[k];dbA.src=c?c:`/api/dub/${dbJob}/seg/${k}`;
+      dbA.playbackRate=rate;dbA.preservesPitch=true;dbA.volume=+$('#dbVol').value/100;
+      if(want>.25){const w=want;dbA.addEventListener('loadedmetadata',()=>{try{dbA.currentTime=w}catch(e){}},{once:true})}dbA.play().catch(()=>{});dbPrefetch(k+1)}
     return}
   if(want<sg.dur-.1){if(dbA.paused&&!dbA.ended)dbA.play().catch(()=>{});else if(Math.abs(dbA.currentTime-want)>.6)dbA.currentTime=want}
 }

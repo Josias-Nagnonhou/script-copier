@@ -3709,7 +3709,7 @@ def dub_segments(words):
 
 def dub_translate(job, batch, prev):
     """Traduction naturelle, à dire à voix haute, qui tient dans le temps de chaque phrase."""
-    items = [{"i": sg["n"], "texte": sg["src"], "max_caracteres": int(sg["slot"] * DUB_CPS * 1.05)} for sg in batch]
+    items = [{"i": sg["n"], "texte": sg["src"], "max_caracteres": int(sg["slot"] * DUB_CPS * .95)} for sg in batch]
     ctx = " ".join(p["src"] for p in prev[-3:])
     prompt = (
         "Tu fais le doublage français d'une vidéo (tutoriel, cours, conférence…). On te donne des phrases parlées, dans "
@@ -3749,7 +3749,17 @@ def dub_voice(job, sg):
     need = len(txt) / DUB_CPS / max(sg["slot"], .6)
     rate = int(max(0, min(60, (need - 1) * 100 + 4)))
     for attempt in range(2):
-        tts_to_file(txt, job["voice_id"], path, rate=f"+{rate}%")
+        raw = path + ".raw.mp3"
+        tts_to_file(txt, job["voice_id"], raw, rate=f"+{rate}%")
+        # coupe le petit silence au début et à la fin : la voix démarre pile avec l'orateur
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", raw, "-af",
+                            "silenceremove=start_periods=1:start_threshold=-42dB:start_silence=0.02,"
+                            "areverse,silenceremove=start_periods=1:start_threshold=-42dB:start_silence=0.05,areverse",
+                            "-c:a", "libmp3lame", "-b:a", "64k", path], capture_output=True)
+        if r.returncode != 0 or not os.path.exists(path) or os.path.getsize(path) < 500:
+            shutil.move(raw, path)
+        elif os.path.exists(raw):
+            os.remove(raw)
         dur = probe_duration(path) or 0
         if dur <= sg["slot"] * 1.08 or rate >= 85:
             break

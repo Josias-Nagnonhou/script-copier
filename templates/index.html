@@ -296,7 +296,9 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .fbst.ok{background:#e6f6ec;color:#167a3c}
 #fbConn.ok .steps,#fbConn.ok .hint{display:none}
 .dbframe [hidden],.dbwatch[hidden],.dbst[hidden]{display:none!important}
-.dbst{margin-top:12px}.dbst small{opacity:.8}
+.dbst{margin-top:12px}
+.dburl{width:100%;font-size:16px;padding:15px 16px;border:2px solid var(--ink);border-radius:14px}
+#dbVoice{width:100%}.dbst small{opacity:.8}
 .dbwatch{margin-top:16px}.dbwatch h2{margin:0 0 10px;font:800 18px var(--display)}
 .dbstage{display:grid;gap:10px}
 .dbframe{position:relative;aspect-ratio:16/9;background:#000;border-radius:16px;overflow:hidden}
@@ -948,8 +950,9 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <h1>Regarde n'importe quelle vidéo<br><span>en français</span>.</h1>
     <section class="tile">
       <label for="dbUrl">Lien de la vidéo (YouTube, en anglais ou toute autre langue)</label>
-      <div class="kline"><input id="dbUrl" type="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
-        <select id="dbVoice" aria-label="Voix française"><option value="henri">Voix d'homme · Henri (France)</option><option value="denise">Voix de femme · Denise (France)</option><option value="remy">Voix d'homme · Rémy (très naturelle)</option><option value="vivienne">Voix de femme · Vivienne (très naturelle)</option><option value="antoine">Voix d'homme · Antoine (Québec)</option><option value="sylvie">Voix de femme · Sylvie (Québec)</option><option value="gerard">Voix d'homme · Gérard (Belgique)</option><option value="ariane">Voix de femme · Ariane (Suisse)</option></select></div>
+      <input id="dbUrl" class="dburl" type="url" inputmode="url" placeholder="Colle ici le lien : https://www.youtube.com/watch?v=…" autocomplete="off">
+      <label for="dbVoice" style="margin-top:12px">Voix française</label>
+      <select id="dbVoice"><option value="henri">Voix d'homme · Henri (France)</option><option value="denise">Voix de femme · Denise (France)</option><option value="remy">Voix d'homme · Rémy (très naturelle)</option><option value="vivienne">Voix de femme · Vivienne (très naturelle)</option><option value="antoine">Voix d'homme · Antoine (Québec)</option><option value="sylvie">Voix de femme · Sylvie (Québec)</option><option value="gerard">Voix d'homme · Gérard (Belgique)</option><option value="ariane">Voix de femme · Ariane (Suisse)</option></select>
       <button class="go" id="dbGo">Traduire en français →</button>
       <p class="hint">Kopi récupère ce qui est dit (sous-titres de la vidéo, sinon l'IA écoute), le traduit en français parlé, puis une voix Microsoft gratuite le lit en même temps que l'image. Tu peux commencer à regarder dès que la première minute est prête.</p>
       <div class="dbst" id="dbSt" hidden><div class="bar live" id="dbBar"><i id="dbFill"></i></div><small id="dbStep"></small></div>

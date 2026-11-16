@@ -5206,6 +5206,20 @@ def ping():
     return "ok"
 
 
+@app.after_request
+def _mark_downloaded(resp):
+    """Dès qu'un résultat est téléchargé, le serveur n'a plus besoin de rester éveillé pour lui."""
+    try:
+        if request.method == "GET" and resp.status_code == 200 and \
+                "attachment" in (resp.headers.get("Content-Disposition") or ""):
+            m = re.search(r"/api/(?:[a-z]+/)?([0-9a-f]{12})(?:/|$)", request.path)
+            if m and m.group(1) in JOBS:
+                JOBS[m.group(1)]["downloaded"] = True
+    except Exception:
+        pass
+    return resp
+
+
 def _keepalive():
     """Le plan gratuit de Render endort le serveur après ~15 min sans visite, même si un ebook est en cours.
     Tant qu'un ebook ou un kit tourne, le serveur se rend visite toutes les 4 minutes."""
@@ -5214,7 +5228,10 @@ def _keepalive():
         time.sleep(240)
         busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean", "thumb", "dub", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
                    for j in list(JOBS.values())) or any(j.get("export_state") == "working" for j in list(JOBS.values()))
-        if busy:
+        # un résultat terminé mais pas encore téléchargé : on reste éveillé jusqu'à 6 h pour ne pas le perdre
+        waiting = any(j.get("phase") == "done" and not j.get("downloaded") and j.get("finished")
+                      and time.time() - j["finished"] < 6 * 3600 for j in list(JOBS.values()))
+        if busy or waiting:
             try:
                 requests.get(url, timeout=20)
             except Exception:

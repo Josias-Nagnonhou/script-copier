@@ -113,7 +113,22 @@ def _cf_check():
         print("Cloudflare : vérification impossible", type(e).__name__, flush=True)
 
 
-threading.Thread(target=_cf_check, daemon=True).start()
+import store as STORE_MOD
+ST = STORE_MOD.Store(os.path.join(tempfile.gettempdir(), "kopi_historique.sqlite"), cf=lambda: (CF_ACCOUNT, CF_TOKEN))
+
+
+def _boot():
+    """Au démarrage : Cloudflare, puis base de l'historique, puis reprise des copies interrompues."""
+    time.sleep(4)  # laisse le serveur finir de démarrer
+    _cf_check()
+    ST.connect(log=lambda m: print(m, flush=True))
+    try:
+        resume_unfinished()
+    except Exception as e:
+        print(f"Historique : reprise impossible ({str(e)[:150]})", flush=True)
+
+
+threading.Thread(target=_boot, daemon=True).start()
 print("Clé Groq :", "trouvée" if GROQ_KEY else "ABSENTE", "| variables :",
       sorted(k for k in os.environ if not k.upper().startswith(("RENDER", "PYTHON", "PATH", "HOME", "LANG", "GPG", "HOSTNAME", "KUBERNETES"))), flush=True)
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "whisper-large-v3-turbo")
@@ -442,6 +457,8 @@ def process_item(job, item):
         item["status"], item["msg"] = "error", msg[:200]
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+        if job.get("persist"):
+            ST.save_item(job, item)
 
 
 def paragraphs(text, n=4):
@@ -503,24 +520,79 @@ def run_job(job):
         job["source_name"] = name
         job["items"] = [{"n": i + 1, "url": v["url"], "title": v["title"], "status": "pending",
                          "msg": "", "method": "", "text": ""} for i, v in enumerate(vids)]
-        job["phase"] = "transcribing"
-        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-            list(ex.map(lambda it: process_item(job, it), job["items"]))
-        if not any(i["status"] == "done" for i in job["items"]):
-            raise RuntimeError(job.get("block_msg") or "Aucune vidéo n'a pu être transcrite.")
-        safe = re.sub(r"[^\w-]+", "_", name)[:40].strip("_") or "scripts"
-        job["filename"] = f"Scripts_{safe}.docx"
-        job["file"] = os.path.join(BASE, job["id"] + ".docx")
-        build_docx(job, job["file"])
-        job["phase"] = "done"
-        print(f"[tâche {job['id']}] terminée : {sum(i['status'] == 'done' for i in job['items'])}/{len(job['items'])} scripts", flush=True)
+        job["persist"] = True
+        ST.save_job(job, "scripts", "running", job_params(job))
+        ST.save_items(job)
+        transcribe_and_finish(job)
     except Exception as e:
         msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
         print(f"[tâche {job['id']}] erreur : {msg[:200]}", flush=True)
         if job["platform"] == "youtube" and is_bot_block(msg):
             msg = bot_message()
         job["phase"], job["error"] = "error", msg[:300]
+        if job.get("persist"):
+            ST.save_job(job, "scripts", "error", job_params(job))
     job["finished"] = time.time()
+
+
+def job_params(job):
+    return {k: job.get(k) for k in ("lang", "sort", "limit", "from_audit") if job.get(k) not in (None, "")}
+
+
+def transcribe_and_finish(job, pdf=False):
+    """Transcrit les vidéos encore à faire, puis fabrique le Word (et le PDF). Sert aussi à la reprise."""
+    job["phase"] = "transcribing"
+    todo = [it for it in job["items"] if it["status"] not in ("done", "empty")]
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        list(ex.map(lambda it: process_item(job, it), todo))
+    if not any(i["status"] == "done" for i in job["items"]):
+        raise RuntimeError(job.get("block_msg") or "Aucune vidéo n'a pu être transcrite.")
+    safe = re.sub(r"[^\w-]+", "_", job["source_name"])[:40].strip("_") or "scripts"
+    job["filename"] = f"Scripts_{safe}.docx"
+    job["file"] = os.path.join(BASE, job["id"] + ".docx")
+    build_docx(job, job["file"])
+    if pdf or job.get("from_audit"):
+        job["pdf"] = os.path.join(BASE, job["id"] + ".pdf")
+        try:
+            build_scripts_pdf(job, job["pdf"])
+        except Exception as e:
+            job["pdf"] = ""
+            print(f"[scripts {job['id']}] PDF impossible : {str(e)[:200]}", flush=True)
+    job["phase"] = "done"
+    ST.save_job(job, "scripts", "done", job_params(job))
+    print(f"[tâche {job['id']}] terminée : {sum(i['status'] == 'done' for i in job['items'])}/{len(job['items'])} scripts", flush=True)
+
+
+def resume_unfinished():
+    """Reprend toutes les copies de scripts qui ont été coupées (redémarrage, mise en veille, mise à jour)."""
+    rows = [r for r in ST.jobs(500) if r.get("status") == "running" and r.get("kind") == "scripts"]
+    for r in rows:
+        if r["id"] in JOBS:
+            continue
+        prm = json.loads(r.get("params") or "{}")
+        items = [{"n": it["n"], "url": it["url"], "title": it["title"] or "", "status": it["status"] or "pending",
+                  "msg": it.get("msg") or "", "method": it.get("method") or "", "text": it.get("text") or ""}
+                 for it in ST.items(r["id"])]
+        for it in items:
+            if it["status"] in ("working", "error"):
+                it["status"], it["msg"] = "pending", ""
+        job = {"id": r["id"], "platform": r["platform"], "source": r["source"], "url": r["url"],
+               "limit": prm.get("limit", 0), "sort": prm.get("sort", "recent"), "lang": prm.get("lang", ""),
+               "phase": "transcribing", "items": items, "source_name": r["title"] or r["source"], "error": "",
+               "created": r["created"], "persist": True, "resumed": True, "from_audit": prm.get("from_audit")}
+        with LOCK:
+            JOBS[job["id"]] = job
+        left = sum(1 for it in items if it["status"] not in ("done", "empty"))
+        print(f"[tâche {job['id']}] reprise automatique : {len(items) - left}/{len(items)} déjà faits, {left} à faire", flush=True)
+
+        def go(j=job):
+            try:
+                transcribe_and_finish(j)
+            except Exception as e:
+                j["phase"], j["error"] = "error", str(e)[:300]
+                ST.save_job(j, "scripts", "error", job_params(j))
+            j["finished"] = time.time()
+        threading.Thread(target=go, daemon=True).start()
 
 
 def cleanup():
@@ -628,9 +700,88 @@ def job_docx(jid):
     if not authed():
         return "Non connecté", 401
     j = JOBS.get(jid)
-    if not j or not j.get("file") or not os.path.exists(j["file"]):
-        return "Fichier introuvable", 404
-    return send_file(j["file"], as_attachment=True, download_name=j["filename"])
+    if j and j.get("file") and os.path.exists(j["file"]) and request.args.get("partial") != "1":
+        return send_file(j["file"], as_attachment=True, download_name=j["filename"])
+    return history_docx(jid)
+
+
+def _history_job(jid):
+    """La tâche, depuis la mémoire si elle y est encore, sinon depuis la sauvegarde."""
+    j = JOBS.get(jid)
+    if j and j.get("items"):
+        return j
+    r = ST.job(jid)
+    if not r:
+        return None
+    items = [{"n": it["n"], "url": it["url"], "title": it["title"] or "", "status": it["status"],
+              "msg": it.get("msg") or "", "method": it.get("method") or "", "text": it.get("text") or ""}
+             for it in ST.items(jid)]
+    return {"id": jid, "platform": r["platform"], "source_name": r["title"] or r["source"], "items": items}
+
+
+@app.get("/api/history/<jid>/docx")
+def history_docx(jid):
+    """Word de tout ce qui est déjà fait (même au milieu d'une copie, même des jours après)."""
+    if not authed():
+        return "Non connecté", 401
+    j = _history_job(jid)
+    if not j or not any(i["status"] == "done" for i in j["items"]):
+        return "Aucun script enregistré pour cette tâche.", 404
+    done = sum(1 for i in j["items"] if i["status"] == "done")
+    tmp = os.path.join(BASE, f"h_{jid}_{int(time.time())}.docx")
+    build_docx(j, tmp)
+    safe = re.sub(r"[^\w-]+", "_", j["source_name"] or "scripts")[:40].strip("_") or "scripts"
+    name = f"Scripts_{safe}" + ("" if done == len(j["items"]) else f"_{done}_sur_{len(j['items'])}") + ".docx"
+    resp = send_file(tmp, as_attachment=True, download_name=name)
+    threading.Timer(120, lambda: os.path.exists(tmp) and os.remove(tmp)).start()
+    return resp
+
+
+@app.get("/api/history/<jid>/text")
+def history_text(jid):
+    if not authed():
+        return "Non connecté", 401
+    j = _history_job(jid)
+    if not j:
+        return "Introuvable", 404
+    done = [i for i in j["items"] if i["status"] == "done"]
+    out = "\n\n".join(f"Script {n} — {i['title']}\n{i['url']}\n{i['text']}" for n, i in enumerate(done, 1))
+    safe = re.sub(r"[^\w-]+", "_", j["source_name"] or "scripts")[:40].strip("_") or "scripts"
+    return out, 200, {"Content-Type": "text/plain; charset=utf-8",
+                      "Content-Disposition": f'attachment; filename="Scripts_{safe}.txt"'}
+
+
+@app.get("/api/history")
+def history_list():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    try:
+        rows = ST.jobs(300)
+    except Exception as e:
+        return jsonify(error=f"Historique illisible : {str(e)[:150]}", mode=ST.mode, note=ST.note), 500
+    out = []
+    for r in rows:
+        live = JOBS.get(r["id"])
+        st = r["status"]
+        done, total = r.get("done") or 0, r.get("total") or 0
+        if live:
+            st = {"done": "done", "error": "error"}.get(live["phase"], "running")
+            done = sum(1 for i in live.get("items") or [] if i["status"] == "done")
+            total = len(live.get("items") or []) or total
+        out.append({"id": r["id"], "kind": r["kind"], "platform": r["platform"], "title": r["title"], "url": r["url"],
+                    "status": st, "created": r["created"], "updated": r["updated"], "done": done, "total": total,
+                    "error": r.get("error") or ""})
+    return jsonify(jobs=out, mode=ST.mode, note=ST.note)
+
+
+@app.delete("/api/history/<jid>")
+def history_delete(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    if jid in JOBS and JOBS[jid].get("phase") not in ("done", "error"):
+        return jsonify(error="Cette copie est encore en cours."), 409
+    ST.delete(jid)
+    return jsonify(ok=True)
 
 
 # ------------------------------------------------ transcription d'un fichier
@@ -1643,6 +1794,11 @@ def set_cf_account():
     CF_ACCOUNT = acc
     EB.DOWN.pop("cloudflare", None)
     print("Cloudflare : Account ID ajouté depuis Kopi ✓", flush=True)
+    if ST.mode != "d1":
+        def _later():
+            if ST.connect(log=lambda m: print(m, flush=True)):
+                resume_unfinished()
+        threading.Thread(target=_later, daemon=True).start()
     return jsonify(ok=True)
 
 
@@ -3027,27 +3183,15 @@ def build_scripts_pdf(job, path):
 def run_scripts_list_job(job):
     print(f"[scripts {job['id']}] « {job['source_name']} » : {len(job['items'])} vidéos", flush=True)
     try:
-        job["phase"] = "transcribing"
-        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-            list(ex.map(lambda it: process_item(job, it), job["items"]))
-        if not any(i["status"] == "done" for i in job["items"]):
-            raise RuntimeError(job.get("block_msg") or "Aucune vidéo n'a pu être transcrite.")
-        safe = re.sub(r"[^\w-]+", "_", job["source_name"])[:40].strip("_") or "scripts"
-        job["filename"] = f"Scripts_{safe}.docx"
-        job["file"] = os.path.join(BASE, job["id"] + ".docx")
-        build_docx(job, job["file"])
-        job["pdf"] = os.path.join(BASE, job["id"] + ".pdf")
-        try:
-            build_scripts_pdf(job, job["pdf"])
-        except Exception as e:
-            job["pdf"] = ""
-            print(f"[scripts {job['id']}] PDF impossible : {str(e)[:200]}", flush=True)
-        job["phase"] = "done"
-        print(f"[scripts {job['id']}] terminé : {sum(i['status'] == 'done' for i in job['items'])}/{len(job['items'])}", flush=True)
+        job["persist"] = True
+        ST.save_job(job, "scripts", "running", job_params(job))
+        ST.save_items(job)
+        transcribe_and_finish(job, pdf=True)
     except Exception as e:
         msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
         print(f"[scripts {job['id']}] erreur : {msg[:200]}", flush=True)
         job["phase"], job["error"] = "error", msg[:300]
+        ST.save_job(job, "scripts", "error", job_params(job))
     job["finished"] = time.time()
 
 

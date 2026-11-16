@@ -2171,10 +2171,21 @@ function chip(i){
 }
 function watch(id){
   clearInterval(timer);$('#listBox').hidden=false;
+  let n=0,fails=0;
   const tick=async()=>{
     let d;
-    try{const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw d}
-    catch(e){clearInterval(timer);busy(false);$('#state').innerHTML=`<div class="err">${esc((e&&e.error)||'Connexion perdue')}</div>`;try{localStorage.removeItem('job')}catch(_){}return}
+    // Pendant la copie, on ne recharge la liste complète que de temps en temps (léger sur téléphone)
+    try{
+      if(n++%8!==0&&!document.hidden){const r=await fetch('/api/job/'+id+'/progress');const p=await r.json();if(!r.ok)throw Object.assign(p,{status:r.status});
+        if(p.phase!=='done'&&p.phase!=='error'){fails=0;$('#ok').textContent=p.done;$('#tot').textContent='/'+p.total;
+          $('#fill').style.width=p.total?((p.done+p.failed)/p.total*100)+'%':'6%';
+          $('#state').innerHTML=p.phase==='listing'?'Recherche des vidéos du compte…':`Transcription de ${esc(p.source_name||'')} · ${p.done+p.failed}/${p.total}`;busy(true);return}}
+      const r=await fetch('/api/job/'+id);d=await r.json();if(!r.ok)throw Object.assign(d,{status:r.status})}
+    catch(e){
+      if(e&&e.status===404){clearInterval(timer);busy(false);$('#state').innerHTML=`<div class="err">${esc(e.error||'Copie introuvable')}</div>`;try{localStorage.removeItem('job')}catch(_){}return}
+      // simple coupure réseau : la copie continue sur le serveur, on réessaie sans rien arrêter
+      fails++;$('#state').innerHTML=`<small>Connexion instable… la copie continue sur le serveur, nouvelle tentative${fails>1?' ('+fails+')':''}.</small>`;return}
+    fails=0;
     const items=d.items,fin=items.filter(i=>['done','error','empty'].includes(i.status)).length,ok=items.filter(i=>i.status==='done').length;
     $('#ok').textContent=ok;$('#tot').textContent='/'+items.length;
     $('#fill').style.width=items.length?(fin/items.length*100)+'%':(d.phase==='listing'?'6%':'0');
@@ -2189,9 +2200,11 @@ function watch(id){
         let txt='';fetch('/api/job/'+id+'/text').then(r=>r.ok?r.text():'').then(t=>{txt=t;try{localStorage.setItem('accText',t)}catch(e){}}).catch(()=>{});
         $('#copy').onclick=()=>copyText(txt,$('#copy'),'Copier tout le texte');}}
   };
-  tick();timer=setInterval(tick,2500);
+  tick();timer=setInterval(tick,3000);
 }
 try{const j=localStorage.getItem('job');if(j)watch(j)}catch(e){}
+// quand on revient sur la page (téléphone réveillé), on rafraîchit tout de suite
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){try{const j=localStorage.getItem('job');if(j&&!timer)watch(j)}catch(e){}}});
 </script>
 </body>
 </html>

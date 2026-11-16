@@ -322,7 +322,11 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 #dbList button:hover{background:var(--soft)}#dbList button.on{background:var(--soft);font-weight:700}
 #dbList time{color:var(--muted);font-variant-numeric:tabular-nums}#dbList .np{opacity:.45}
 .histbtn{border:0;cursor:pointer;color:var(--ink)}.histbtn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
-.histpanel{margin:-14px 0 26px}.histpanel[hidden],#dlPart[hidden],#safeNote[hidden]{display:none!important}
+.histpanel{margin:18px 0 0}#dlPart[hidden],#safeNote[hidden]{display:none!important}
+.histpanel summary{cursor:pointer;list-style:none;display:grid;gap:2px}.histpanel summary::-webkit-details-marker{display:none}
+.histpanel summary h2{margin:0;font:800 18px var(--display);display:flex;align-items:center;gap:8px}
+.histpanel summary h2::after{content:"▾";font-size:14px;color:var(--muted);transition:transform .2s}.histpanel[open] summary h2::after{transform:rotate(180deg)}
+.histpanel[open] summary{margin-bottom:10px}
 #histList{display:grid;gap:8px;margin-top:6px}
 .hrow{display:grid;grid-template-columns:1fr auto;gap:8px 14px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px 14px}
 .hrow b{font-size:15px}.hrow small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
@@ -391,16 +395,9 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <div class="right">
       {% if groq %}<span class="pill"><i></i>Groq connecté</span>{% else %}<span class="pill off"><i></i>Groq absent</span>{% endif %}
       <button class="pill ytpill {{ 'off' if yt != 'ok' else '' }}" id="ytBtn" aria-expanded="false" aria-controls="ytPanel"><i></i><span id="ytLabel">{{ {'ok':'YouTube connecté','expired':'YouTube expiré','absent':'Connecter YouTube'}[yt] }}</span></button>
-      <button class="pill histbtn" id="histBtn" aria-expanded="false" aria-controls="histPanel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>Historique</button>
       <button class="icon" id="theme" aria-label="Changer de thème">◐</button>
     </div>
   </header>
-
-  <section class="tile histpanel" id="histPanel" hidden>
-    <div class="ythead"><h2>Historique</h2><button class="icon" id="histClose" aria-label="Fermer">✕</button></div>
-    <p class="hint" id="histNote"></p>
-    <div id="histList"><p class="hint">Chargement…</p></div>
-  </section>
 
   <section class="tile ytpanel" id="ytPanel" hidden>
     <div class="ythead"><h2>Connecter YouTube</h2><button class="icon" id="ytClose" aria-label="Fermer">✕</button></div>
@@ -1084,6 +1081,12 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     </aside>
   </div>
 
+  <details class="tile histpanel" id="histPanel">
+    <summary><h2>Historique de tes copies de scripts</h2><span class="hint">Retrouve et retélécharge toutes tes copies, même des jours après.</span></summary>
+    <p class="hint" id="histNote"></p>
+    <div id="histList"><p class="hint">Chargement…</p></div>
+  </details>
+
   <section class="list" id="listBox" hidden>
     <h2 id="listTitle">Scripts</h2>
     <div id="list"></div>
@@ -1607,13 +1610,12 @@ async function histLoad(){
         ${j.status==='running'?`<button class="btn" data-follow="${j.id}">Suivre</button>`:`<button class="btn" data-del="${j.id}" title="Supprimer de l'historique">Supprimer</button>`}</div></div>`}).join('');
   }catch(e){box.innerHTML=`<p class="err">${esc(e.message)}</p>`}
 }
-$('#histBtn').onclick=()=>{const p=$('#histPanel');p.hidden=!p.hidden;$('#histBtn').setAttribute('aria-expanded',String(!p.hidden));if(!p.hidden)histLoad()};
-$('#histClose').onclick=()=>{$('#histPanel').hidden=true;$('#histBtn').setAttribute('aria-expanded','false')};
+$('#histPanel').addEventListener('toggle',()=>{if($('#histPanel').open)histLoad()});
 $('#histPanel').addEventListener('click',async e=>{
   const del=e.target.closest('[data-del]'),fol=e.target.closest('[data-follow]'),how=e.target.closest('#histHow');
   if(how){e.preventDefault();alertBox()}
   if(del){if(!confirm('Supprimer cette copie de l\'historique ?'))return;await fetch('/api/history/'+del.dataset.del,{method:'DELETE'});histLoad()}
-  if(fol){try{localStorage.setItem('job',fol.dataset.follow)}catch(_){}document.getElementById('tabAcc').click();$('#histPanel').hidden=true;watch(fol.dataset.follow)}
+  if(fol){try{localStorage.setItem('job',fol.dataset.follow)}catch(_){}$('#histPanel').open=false;window.scrollTo({top:0,behavior:'smooth'});watch(fol.dataset.follow)}
 });
 function alertBox(){$('#histNote').innerHTML=`Pour que tout soit gardé pour toujours, ajoute 2 permissions à ton jeton Cloudflare : ouvre <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">dash.cloudflare.com/profile/api-tokens</a> → ton jeton → <b>Modifier</b> → <b>Ajouter</b> : « Compte · D1 · Modifier » et « Compte · Paramètres du compte · Lire » → Enregistrer. Kopi s'en occupe ensuite tout seul.`}
 

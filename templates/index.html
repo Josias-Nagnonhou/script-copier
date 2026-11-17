@@ -234,22 +234,36 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .imgsrc{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0 28px}
 .imgsrc .pill{font-size:12px;padding:5px 10px}
 .dlink{text-decoration:none}.dlink:hover{filter:brightness(.95)}
-.modes{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:-6px 0 30px}
+.modes{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin:-6px 0 30px}
+.modes button:last-child{grid-column:span 2}
 .modes button{--c:#3d7bff;display:flex;align-items:center;gap:10px;min-width:0;padding:9px 11px;border-radius:16px;background:var(--card);border:1px solid var(--line);color:var(--ink);font:800 13.5px/1.15 var(--body);text-align:left;cursor:pointer;transition:transform .15s,border-color .2s,box-shadow .2s,background .2s}
 .modes button[data-c="v"]{--c:#ff6a3d}.modes button[data-c="d"]{--c:#12b886}.modes button[data-c="s"]{--c:#8b5cf6}
 .modes button svg{width:34px;height:34px;flex:none;padding:7.5px;border-radius:11px;fill:none;stroke:var(--c);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;background:color-mix(in srgb,var(--c) 13%,transparent);transition:background .2s,stroke .2s}
-.modes button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modes button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:normal;line-height:1.15}
 .modes button:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--c) 55%,var(--line));box-shadow:0 8px 22px -12px color-mix(in srgb,var(--c) 70%,transparent)}
 .modes button.on{background:var(--ink);border-color:var(--ink);color:var(--on-ink);box-shadow:0 10px 26px -14px rgba(0,0,0,.55)}
 .modes button.on svg{background:var(--c);stroke:#fff}
-@media (max-width:980px){.modes{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media (max-width:560px){.modes{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:-8px 0 24px}
+@media (min-width:981px){.modes button{gap:8px;padding:9px 8px;font-size:13px}.modes button svg{width:31px;height:31px;padding:7px}}
+@media (max-width:980px){.modes{grid-template-columns:repeat(5,minmax(0,1fr))}.modes button:last-child{grid-column:span 3}}
+@media (max-width:560px){.modes{grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:-8px 0 24px}
+  .modes button:last-child{flex-direction:row;gap:10px;font-size:12.5px}
   .modes button{flex-direction:column;justify-content:center;gap:6px;padding:10px 3px 9px;border-radius:14px;font-size:11px;text-align:center}
   .modes button span{white-space:normal;line-height:1.15}.modes button svg{width:32px;height:32px;padding:7px;border-radius:10px}
   .modes button:hover{transform:none}}
 .fdrop{padding:34px 18px;gap:6px}
 .fdrop b{font-size:17px;word-break:break-word}
 .fic{width:48px;height:48px;border-radius:14px;background:var(--ink);color:var(--lime);display:grid;place-items:center;font-size:22px;margin-bottom:6px}
+.cvdrops{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:620px){.cvdrops{grid-template-columns:1fr}}
+.cvcov{position:relative;overflow:hidden}
+.cvcov img{max-height:150px;max-width:100%;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.18);margin-bottom:6px}
+.cvres{margin-top:18px;max-width:820px}
+.cvres h3{margin:0 0 12px}
+.cvpages{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.cvpages figure{margin:0;text-align:center}
+.cvpages img{width:100%;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);background:#fff;display:block}
+.cvpages figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.cvpages figure:first-child figcaption{color:var(--ink);font-weight:700}
 .fdrop.has{border-style:solid;border-color:var(--ink);background:var(--card)}
 .ftext{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;max-height:460px;overflow:auto;font-size:16px;line-height:1.75;max-width:100%}
 .ftext p{margin:0 0 14px;max-width:72ch}
@@ -428,6 +442,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
     <button role="tab" id="tabMd" data-c="d" aria-selected="false" aria-controls="modeMd" title="Photos et médias d'un post X ou TikTok"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="m21 16-4.5-4.5L7 21"/></svg><span>Photos</span></button>
     <button role="tab" id="tabAu" data-c="s" aria-selected="false" aria-controls="modeAu" title="Analyser ton audience et savoir quoi lui vendre"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5h18M6 16.5V12M10.5 16.5V8M15 16.5v-5M19.5 16.5V5"/></svg><span>Monétiser</span></button>
     <button role="tab" id="tabKit" data-c="s" aria-selected="false" aria-controls="modeKit" title="Visuels et description pour vendre ton ebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5 11 5h8v8l-7.5 7.5a1.5 1.5 0 0 1-2.1 0l-5.9-5.9a1.5 1.5 0 0 1 0-2.1z"/><circle cx="15.5" cy="8.5" r="1.4"/></svg><span>Kit de vente</span></button>
+    <button role="tab" id="tabCv" data-c="s" aria-selected="false" aria-controls="modeCv" title="Remplacer la couverture d'un ebook déjà fait"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h10.5a1.5 1.5 0 0 1 1.5 1.5v14a1.5 1.5 0 0 1-1.5 1.5H6a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 6 3.5z"/><path d="m7.5 15 2.6-3 2 2.2 1.6-1.7 2.3 2.5"/><path d="M20.5 7.5v9"/></svg><span>Couverture</span></button>
     <button role="tab" id="tabTh" data-c="s" aria-selected="false" aria-controls="modeTh" title="Créer des miniatures YouTube, TikTok…"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m7 15 3-3.5 2.5 2.5L15 10l3 5"/><circle cx="8.5" cy="9" r="1.2"/></svg><span>Miniature</span></button>
   </nav>
 
@@ -503,6 +518,52 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
         <label for="kHook" style="margin-top:12px">Accroche pour tes réseaux</label>
         <div class="kline"><input id="kHook"><button type="button" class="btn" id="kCopyHook">Copier</button></div>
       </section>
+    </section>
+  </div>
+
+  <div id="modeCv" role="tabpanel" hidden>
+    <h1>Ton ebook est fini.<br>Mets-lui <span>ta nouvelle couverture</span>.</h1>
+    <div class="bento">
+      <section class="tile">
+        <div class="cvdrops">
+          <label class="drop fdrop" id="cvBookDrop" for="cvBook">
+            <input type="file" id="cvBook" accept=".pdf,.docx,application/pdf">
+            <span class="fic" aria-hidden="true">1</span>
+            <b id="cvBookName">Ton ebook complet</b>
+            <small>PDF (ou Word .docx), tel qu'il est aujourd'hui</small>
+          </label>
+          <label class="drop fdrop cvcov" id="cvCovDrop" for="cvCov">
+            <input type="file" id="cvCov" accept="image/*,.heic,.pdf">
+            <img id="cvCovImg" alt="" hidden>
+            <span class="fic" aria-hidden="true" id="cvCovIc">2</span>
+            <b id="cvCovName">Ta nouvelle couverture</b>
+            <small>Image JPG, PNG… (ou PDF)</small>
+          </label>
+        </div>
+        <label style="margin-top:16px">L'ancienne couverture</label>
+        <div class="seg" id="cvMode"><button data-v="remplacer" class="on">La supprimer</button><button data-v="ajouter">La garder derrière</button></div>
+        <div id="cvRemoveBox">
+          <label for="cvRemove">Pages à enlever au début du livre</label>
+          <select id="cvRemove"><option value="1" selected>1 page (la couverture)</option><option value="2">2 pages (couverture + page suivante)</option><option value="3">3 pages</option></select>
+          <p class="hint">Si ton ancienne couverture est suivie d'une page blanche ou d'une 2e page de titre, choisis 2 pages. L'aperçu te montre le résultat.</p>
+        </div>
+        <label style="margin-top:12px">Si l'image n'a pas le même format que les pages</label>
+        <div class="seg" id="cvFit"><button data-v="remplir" class="on">Remplir toute la page</button><button data-v="entiere">Montrer l'image entière</button></div>
+        <p class="hint" id="cvFitHint">La couverture couvre la page de bord à bord (les bords peuvent être légèrement rognés).</p>
+        <button class="go" id="cvGo">Mettre la nouvelle couverture →</button>
+      </section>
+      <aside class="tile stat">
+        <span class="lbl">Ton livre</span>
+        <div class="big"><span id="cvPct">0</span><small>%</small></div>
+        <div class="bar" id="cvBar"><i id="cvFill"></i></div>
+        <div class="state" id="cvState"><span class="empty">Le livre garde tout son contenu, son sommaire et ses liens. Seule la couverture change.</span></div>
+        <div class="acts"><a class="btn dl" id="cvDl" href="#" aria-disabled="true">Télécharger le livre</a></div>
+      </aside>
+    </div>
+    <section id="cvRes" class="cvres" hidden>
+      <h3>Aperçu des premières pages</h3>
+      <div class="cvpages" id="cvPages"></div>
+      <p class="hint" id="cvInfo"></p>
     </section>
   </div>
 
@@ -1152,7 +1213,7 @@ $('#fbFile').onchange=e=>{if(e.target.files[0])fbSend(e.target.files[0])};
 $('#fbDrop').addEventListener('drop',e=>{if(e.dataTransfer.files[0])fbSend(e.dataTransfer.files[0])});
 fbEnsure();
 /* ---------- onglets ---------- */
-const MODES={acc:['#tabAcc','#modeAcc'],db:['#tabDb','#modeDb'],th:['#tabTh','#modeTh'],cl:['#tabCl','#modeCl'],mo:['#tabMo','#modeMo'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit']};
+const MODES={acc:['#tabAcc','#modeAcc'],db:['#tabDb','#modeDb'],th:['#tabTh','#modeTh'],cl:['#tabCl','#modeCl'],mo:['#tabMo','#modeMo'],file:['#tabFile','#modeFile'],net:['#tabNet','#modeNet'],dl:['#tabDl','#modeDl'],tr:['#tabTr','#modeTr'],md:['#tabMd','#modeMd'],au:['#tabAu','#modeAu'],kit:['#tabKit','#modeKit'],cv:['#tabCv','#modeCv']};
 function setMode(m){
   if(!MODES[m])m='acc';
   for(const [k,[t,p]] of Object.entries(MODES)){const on=k===m;$(p).hidden=!on;$(t).classList.toggle('on',on);$(t).setAttribute('aria-selected',String(on))}
@@ -1842,6 +1903,71 @@ function ebWatch(id){
 try{const j=localStorage.getItem('ebJob');if(j)ebWatch(j)}catch(e){}
 
 /* ---------- kit de vente ---------- */
+/* ---------- Couverture : remplacer celle d'un ebook existant ---------- */
+let cvBookObj=null,cvCovObj=null,cvJob=null,cvTimer=null,cvBusy=false,cvModeV='remplacer',cvFitV='remplir';
+function cvDrop(zone,input,pick){
+  $(input).onchange=e=>pick(e.target.files[0]);
+  ['dragenter','dragover'].forEach(t=>$(zone).addEventListener(t,e=>{e.preventDefault();$(zone).classList.add('over')}));
+  ['dragleave','drop'].forEach(t=>$(zone).addEventListener(t,e=>{e.preventDefault();$(zone).classList.remove('over')}));
+  $(zone).addEventListener('drop',e=>pick(e.dataTransfer.files[0]));
+}
+cvDrop('#cvBookDrop','#cvBook',f=>{if(!f)return;
+  if(!/\.(pdf|docx)$/i.test(f.name)){cvErr('L\'ebook doit être un PDF ou un fichier Word (.docx).');return}
+  cvBookObj=f;cvJob=null;$('#cvBookName').textContent=f.name;$('#cvBookDrop').classList.add('has');cvClear()});
+cvDrop('#cvCovDrop','#cvCov',f=>{if(!f)return;cvCovObj=f;$('#cvCovName').textContent=f.name;$('#cvCovDrop').classList.add('has');
+  const im=$('#cvCovImg');if(/^image\/(jpe?g|png|webp|gif)/.test(f.type)){im.src=URL.createObjectURL(f);im.hidden=false;$('#cvCovIc').hidden=true}else{im.hidden=true;$('#cvCovIc').hidden=false}
+  if(cvJob)cvRedo(true)});
+function cvSeg(id,cb){document.querySelectorAll(id+' button').forEach(b=>b.onclick=()=>{document.querySelectorAll(id+' button').forEach(x=>x.classList.toggle('on',x===b));cb(b.dataset.v)})}
+cvSeg('#cvMode',v=>{cvModeV=v;$('#cvRemoveBox').hidden=v!=='remplacer';if(cvJob)cvRedo()});
+cvSeg('#cvFit',v=>{cvFitV=v;$('#cvFitHint').textContent=v==='remplir'?'La couverture couvre la page de bord à bord (les bords peuvent être légèrement rognés).':'Toute l\'image est visible, posée sur un fond flou assorti : rien n\'est coupé.';if(cvJob)cvRedo()});
+$('#cvRemove').onchange=()=>{if(cvJob)cvRedo()};
+function cvClear(){$('#cvRes').hidden=true;$('#cvDl').setAttribute('aria-disabled','true');$('#cvFill').style.width='0';$('#cvPct').textContent='0';$('#cvState').innerHTML='<span class="empty">Le livre garde tout son contenu, son sommaire et ses liens. Seule la couverture change.</span>'}
+function cvSetBusy(on){cvBusy=on;$('#cvGo').classList.toggle('busy',on);$('#cvGo').textContent=on?'Kopi pose ta couverture…':(cvJob?'Refaire avec ces réglages →':'Mettre la nouvelle couverture →');$('#cvBar').classList.toggle('live',on)}
+function cvErr(m){$('#cvState').innerHTML=`<div class="err">${esc(m)}</div>`;cvSetBusy(false)}
+function cvForm(){const fd=new FormData();fd.append('mode',cvModeV);fd.append('fit',cvFitV);fd.append('remove',$('#cvRemove').value);return fd}
+async function cvRedo(newCover){
+  if(cvBusy||!cvJob)return;const fd=cvForm();if(newCover&&cvCovObj)fd.append('cover',cvCovObj);
+  cvSetBusy(true);$('#cvState').textContent='Mise à jour de l\'aperçu…';
+  try{const r=await fetch('/api/cover/'+cvJob+'/redo',{method:'POST',body:fd});const d=await r.json();
+    if(r.status===404){cvJob=null;cvSetBusy(false);return $('#cvGo').click()}
+    if(!r.ok)throw new Error(d.error||'Erreur');cvWatch(cvJob)}catch(e){cvErr(e.message)}
+}
+$('#cvGo').onclick=async()=>{
+  if(cvBusy)return;
+  if(!cvBookObj){cvErr('Choisis d\'abord ton ebook complet (case 1).');return}
+  if(!cvCovObj){cvErr('Choisis ta nouvelle couverture (case 2).');return}
+  if(cvJob)return cvRedo(true);
+  const fd=cvForm();fd.append('book',cvBookObj);fd.append('cover',cvCovObj);
+  cvSetBusy(true);$('#cvRes').hidden=true;$('#cvDl').setAttribute('aria-disabled','true');$('#cvFill').style.width='4%';$('#cvPct').textContent='0';$('#cvState').textContent='Envoi du livre…';
+  try{const r=await fetch('/api/cover',{method:'POST',body:fd});let d;try{d=await r.json()}catch(_){throw new Error(r.status===413?'Fichier trop lourd.':'Envoi interrompu. Vérifie ta connexion et réessaie.')}
+    if(!r.ok)throw new Error(d.error||'Erreur');cvJob=d.job_id;cvWatch(cvJob)}
+  catch(e){cvErr(e.message)}
+};
+function cvWatch(id){
+  clearInterval(cvTimer);cvSetBusy(true);let fails=0;
+  const tick=async()=>{
+    let d;try{const r=await fetch('/api/cover/'+id);d=await r.json();if(!r.ok){clearInterval(cvTimer);cvJob=null;return cvErr(d.error||'Erreur')}fails=0}
+    catch(e){if(++fails>20){clearInterval(cvTimer);cvErr('Connexion perdue. Réessaie.')}return}
+    $('#cvFill').style.width=Math.max(4,d.pct||0)+'%';$('#cvPct').textContent=Math.round(d.pct||0);
+    if(!['done','error'].includes(d.phase)){$('#cvState').textContent=d.step||'Préparation…';return}
+    clearInterval(cvTimer);cvSetBusy(false);
+    if(d.phase==='error')return cvErr(d.error);
+    const v=Date.now(),inf=d.info||{};
+    $('#cvDl').href=`/api/cover/${id}/file?dl=1`;$('#cvDl').setAttribute('aria-disabled','false');
+    let msg;
+    if(d.kind==='pdf'){
+      $('#cvPages').innerHTML=Array.from({length:d.previews},(_,i)=>`<figure><a href="/api/cover/${id}/file" target="_blank" rel="noopener"><img src="/api/cover/${id}/page/${i}?v=${v}" alt="Page ${i+1}"></a><figcaption>${i?'Page '+(i+1):'Page 1 · nouvelle couverture'}</figcaption></figure>`).join('');
+      msg=inf.retirees?`${inf.retirees} page${inf.retirees>1?'s':''} retirée${inf.retirees>1?'s':''} au début, nouvelle couverture en page 1 · ${inf.pages_apres} pages au total.`:`Nouvelle couverture ajoutée devant, l'ancienne est gardée en page 2 · ${inf.pages_apres} pages au total.`;
+      $('#cvInfo').textContent='Si l\'aperçu ne te plaît pas, change un réglage : l\'aperçu se met à jour tout seul.';$('#cvRes').hidden=false;
+    }else{
+      $('#cvRes').hidden=true;
+      msg=inf.remplacee?'La photo de l\'ancienne couverture a été remplacée par la tienne, à la même place.':'Ta couverture a été ajoutée en première page du document Word.';
+    }
+    $('#cvState').innerHTML=`<b>C'est prêt ✓</b><br>${esc(msg)}`;
+  };
+  tick();cvTimer=setInterval(tick,1500);
+}
+
 let kSrc='kopi',kFileObj=null,kTimer=null,kBusy=false;
 function kUseKopi(){
   let id='',t='';try{id=localStorage.getItem('ebDoneId')||'';t=localStorage.getItem('ebDoneTitle')||''}catch(e){}

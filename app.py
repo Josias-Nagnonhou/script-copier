@@ -5350,6 +5350,137 @@ def ping():
     return "ok"
 
 
+# ---------------------------------------------------------------- Couverture : remplacer celle d'un ebook existant
+import coverswap as CS
+
+
+def run_cover_job(job):
+    d = job["dir"]
+    job.update(phase="working", step="Kopi pose ta nouvelle couverture…", pct=20, error="")
+    try:
+        ext = job["book_ext"]
+        out = os.path.join(d, job["out_name"])
+        if ext == ".pdf":
+            info = CS.swap_pdf(job["book"], job["cover"], out, mode=job["mode"], fit=job["fit"], remove=job["remove"])
+            job["pct"] = 70
+            job["previews"] = CS.preview(out, pages=3, width=420)
+        else:
+            info = CS.swap_docx(job["book"], job["cover"], out, mode=job["mode"])
+            job["previews"] = []
+        job.update(info=info, out=out, phase="done", step="Terminé", pct=100, downloaded=False)
+    except Exception as e:
+        msg = str(e)
+        if "EOF marker" in msg or "PdfReadError" in type(e).__name__ or "not a zip" in msg.lower():
+            msg = "Ce fichier est abîmé ou n'est pas un vrai PDF / Word. Ré-exporte ton ebook puis réessaie."
+        job.update(phase="error", error=msg[:300], step="")
+        print(f"couverture : erreur {msg[:200]}", flush=True)
+    finally:
+        job["finished"] = time.time()
+
+
+def _cover_opts(job, form):
+    job["mode"] = "ajouter" if form.get("mode") == "ajouter" else "remplacer"
+    job["fit"] = "entiere" if form.get("fit") == "entiere" else "remplir"
+    try:
+        job["remove"] = max(1, min(5, int(form.get("remove") or 1)))
+    except ValueError:
+        job["remove"] = 1
+
+
+@app.post("/api/cover")
+def start_cover():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    cleanup()
+    book, cov = request.files.get("book"), request.files.get("cover")
+    if not book or not book.filename:
+        return jsonify(error="Choisis ton ebook (PDF ou Word)."), 400
+    if not cov or not cov.filename:
+        return jsonify(error="Choisis ta nouvelle couverture (image JPG, PNG… ou PDF)."), 400
+    bext = os.path.splitext(book.filename)[1].lower()
+    if bext not in (".pdf", ".docx"):
+        return jsonify(error="L'ebook doit être un PDF ou un fichier Word (.docx)."), 400
+    cext = os.path.splitext(cov.filename)[1].lower()[:10] or ".jpg"
+    jid = uuid.uuid4().hex[:12]
+    d = os.path.join(BASE, "cv_" + jid)
+    os.makedirs(d, exist_ok=True)
+    bpath, cpath = os.path.join(d, "livre" + bext), os.path.join(d, "couverture" + cext)
+    book.save(bpath)
+    cov.save(cpath)
+    try:
+        CS.load_cover(cpath)
+    except Exception:
+        shutil.rmtree(d, ignore_errors=True)
+        return jsonify(error="Kopi n'arrive pas à lire ta couverture. Utilise une image JPG ou PNG."), 400
+    name = os.path.splitext(os.path.basename(book.filename))[0][:120] or "ebook"
+    job = {"id": jid, "platform": "cover", "source": name, "source_name": name, "url": "", "limit": 0, "sort": "",
+           "lang": "", "phase": "queued", "items": [], "error": "", "created": time.time(), "step": "Envoi…",
+           "pct": 5, "dir": d, "book": bpath, "book_ext": bext, "cover": cpath,
+           "out_name": re.sub(r'[\\/:*?"<>|]+', " ", name).strip() + " - nouvelle couverture" + bext}
+    _cover_opts(job, request.form)
+    with LOCK:
+        JOBS[jid] = job
+    threading.Thread(target=run_cover_job, args=(job,), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+@app.post("/api/cover/<jid>/redo")
+def redo_cover(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "cover" or not os.path.exists(j.get("book", "")):
+        return jsonify(error="Les fichiers ne sont plus sur le serveur. Réimporte ton ebook et ta couverture."), 404
+    if j.get("phase") in ("queued", "working"):
+        return jsonify(error="Patiente, Kopi termine déjà."), 409
+    f = request.files.get("cover")
+    if f and f.filename:
+        cpath = os.path.join(j["dir"], "couverture2" + (os.path.splitext(f.filename)[1].lower()[:10] or ".jpg"))
+        f.save(cpath)
+        j["cover"] = cpath
+    _cover_opts(j, request.form)
+    j.update(phase="queued", pct=5, finished=None)
+    threading.Thread(target=run_cover_job, args=(j,), daemon=True).start()
+    return jsonify(job_id=jid)
+
+
+@app.get("/api/cover/<jid>")
+def cover_status(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = JOBS.get(jid)
+    if not j or j.get("platform") != "cover":
+        return jsonify(error="Tâche introuvable (le serveur a peut-être redémarré). Réimporte tes fichiers."), 404
+    return jsonify(phase=j["phase"], step=j.get("step", ""), pct=j.get("pct", 0), error=j.get("error", ""),
+                   info=j.get("info") or {}, previews=len(j.get("previews") or []), kind=j["book_ext"].strip("."),
+                   name=j.get("out_name", ""), mode=j.get("mode"), fit=j.get("fit"), remove=j.get("remove"))
+
+
+@app.get("/api/cover/<jid>/page/<int:n>")
+def cover_page(jid, n):
+    if not authed():
+        return "Non connecté", 401
+    pv = (JOBS.get(jid) or {}).get("previews") or []
+    if n >= len(pv):
+        return "Aperçu introuvable", 404
+    return send_file(io.BytesIO(pv[n]), mimetype="image/jpeg", max_age=0)
+
+
+@app.get("/api/cover/<jid>/file")
+def cover_file(jid):
+    if not authed():
+        return "Non connecté", 401
+    j = JOBS.get(jid) or {}
+    out = j.get("out")
+    if not out or not os.path.exists(out):
+        return "Fichier introuvable (le serveur a peut-être redémarré). Réimporte ton ebook et ta couverture.", 404
+    mime = "application/pdf" if out.endswith(".pdf") else \
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if request.args.get("dl") != "1":
+        return send_file(out, mimetype=mime, max_age=0)
+    return send_file(out, mimetype=mime, as_attachment=True, download_name=os.path.basename(out))
+
+
 @app.after_request
 def _mark_downloaded(resp):
     """Dès qu'un résultat est téléchargé, le serveur n'a plus besoin de rester éveillé pour lui."""
@@ -5370,7 +5501,7 @@ def _keepalive():
     url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kopi-x5eh.onrender.com").rstrip("/") + "/ping"
     while True:
         time.sleep(240)
-        busy = any(j.get("platform") in ("ebook", "kit", "audio", "clean", "thumb", "dub", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
+        busy = any(j.get("platform") in ("ebook", "kit", "cover", "audio", "clean", "thumb", "dub", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
                    for j in list(JOBS.values())) or any(j.get("export_state") == "working" for j in list(JOBS.values()))
         # un résultat terminé mais pas encore téléchargé : on reste éveillé jusqu'à 6 h pour ne pas le perdre
         waiting = any(j.get("phase") == "done" and not j.get("downloaded") and j.get("finished")

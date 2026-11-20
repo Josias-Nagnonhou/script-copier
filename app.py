@@ -1993,7 +1993,7 @@ def montage_words(job, src, tmp):
     words, offset = [], 0.0
     for i, p in enumerate(parts, 1):
         job["step"] = "Écoute de la vidéo…" + (f" · partie {i}/{len(parts)}" if len(parts) > 1 else "")
-        words += [[a + offset, b + offset, w] for a, b, w in groq_words(p, job["lang"])]
+        words += [[a + offset, b + offset, w] for a, b, w in groq_words(p, job["lang"], job)]
         offset += probe_duration(p) or 600
         os.remove(p)
     return clean_words(words)
@@ -3818,17 +3818,164 @@ def job_audio_file(jid, kind):
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
-# ------------------------------------------------ doublage : regarder une vidéo étrangère en français
-DUB_VOICES = {"henri": "fr-FR-HenriNeural", "denise": "fr-FR-DeniseNeural", "remy": "fr-FR-RemyMultilingualNeural",
-              "vivienne": "fr-FR-VivienneMultilingualNeural", "antoine": "fr-CA-AntoineNeural",
-              "sylvie": "fr-CA-SylvieNeural", "gerard": "fr-BE-GerardNeural", "ariane": "fr-CH-ArianeNeural"}
-DUB_CPS = 14.5          # caractères lus par seconde à vitesse normale (voix Edge en français)
+# ------------------------------------------------ doublage : une vidéo dans n'importe quelle langue, voix synchronisée
+LANG_FR = {
+    "fr": "Français", "en": "Anglais", "es": "Espagnol", "pt": "Portugais", "de": "Allemand", "it": "Italien",
+    "nl": "Néerlandais", "ar": "Arabe", "tr": "Turc", "ru": "Russe", "uk": "Ukrainien", "pl": "Polonais",
+    "ro": "Roumain", "zh": "Chinois", "ja": "Japonais", "ko": "Coréen", "hi": "Hindi", "bn": "Bengali",
+    "ur": "Ourdou", "fa": "Persan", "he": "Hébreu", "el": "Grec", "sv": "Suédois", "no": "Norvégien",
+    "nb": "Norvégien", "da": "Danois", "fi": "Finnois", "cs": "Tchèque", "sk": "Slovaque", "hu": "Hongrois",
+    "bg": "Bulgare", "hr": "Croate", "sr": "Serbe", "sl": "Slovène", "lt": "Lituanien", "lv": "Letton",
+    "et": "Estonien", "id": "Indonésien", "ms": "Malais", "vi": "Vietnamien", "th": "Thaï", "fil": "Filipino",
+    "tl": "Filipino", "sw": "Swahili", "zu": "Zoulou", "af": "Afrikaans", "am": "Amharique", "so": "Somali",
+    "yo": "Yoruba", "ha": "Haoussa", "ig": "Igbo", "wo": "Wolof", "ln": "Lingala", "rw": "Kinyarwanda",
+    "mg": "Malgache", "ca": "Catalan", "eu": "Basque", "gl": "Galicien", "ga": "Irlandais", "cy": "Gallois",
+    "is": "Islandais", "mt": "Maltais", "sq": "Albanais", "mk": "Macédonien", "bs": "Bosnien", "ka": "Géorgien",
+    "hy": "Arménien", "az": "Azéri", "kk": "Kazakh", "uz": "Ouzbek", "mn": "Mongol", "ne": "Népalais",
+    "si": "Cingalais", "ta": "Tamoul", "te": "Télougou", "kn": "Kannada", "ml": "Malayalam", "mr": "Marathi",
+    "gu": "Gujarati", "pa": "Pendjabi", "km": "Khmer", "lo": "Lao", "my": "Birman", "jv": "Javanais",
+    "su": "Soundanais", "ps": "Pachto", "iu": "Inuktitut", "lb": "Luxembourgeois", "ht": "Créole haïtien",
+}
+# noms renvoyés par Whisper (« french », « german »…) → code
+WHISPER_LANG = {"french": "fr", "english": "en", "spanish": "es", "portuguese": "pt", "german": "de",
+                "italian": "it", "dutch": "nl", "arabic": "ar", "turkish": "tr", "russian": "ru", "ukrainian": "uk",
+                "polish": "pl", "romanian": "ro", "chinese": "zh", "mandarin": "zh", "cantonese": "zh",
+                "japanese": "ja", "korean": "ko", "hindi": "hi", "bengali": "bn", "urdu": "ur", "persian": "fa",
+                "hebrew": "he", "greek": "el", "swedish": "sv", "norwegian": "no", "danish": "da", "finnish": "fi",
+                "czech": "cs", "slovak": "sk", "hungarian": "hu", "bulgarian": "bg", "croatian": "hr",
+                "serbian": "sr", "slovenian": "sl", "lithuanian": "lt", "latvian": "lv", "estonian": "et",
+                "indonesian": "id", "malay": "ms", "vietnamese": "vi", "thai": "th", "tagalog": "tl",
+                "swahili": "sw", "afrikaans": "af", "amharic": "am", "somali": "so", "yoruba": "yo", "hausa": "ha",
+                "lingala": "ln", "malagasy": "mg", "catalan": "ca", "basque": "eu", "galician": "gl", "welsh": "cy",
+                "icelandic": "is", "maltese": "mt", "albanian": "sq", "macedonian": "mk", "bosnian": "bs",
+                "georgian": "ka", "armenian": "hy", "azerbaijani": "az", "kazakh": "kk", "uzbek": "uz",
+                "mongolian": "mn", "nepali": "ne", "sinhala": "si", "tamil": "ta", "telugu": "te", "kannada": "kn",
+                "malayalam": "ml", "marathi": "mr", "gujarati": "gu", "punjabi": "pa", "khmer": "km", "lao": "lo",
+                "myanmar": "my", "burmese": "my", "javanese": "jv", "sundanese": "su", "pashto": "ps",
+                "luxembourgish": "lb", "haitian creole": "ht", "irish": "ga"}
+REGION_FR = {"FR": "France", "CA": "Canada", "BE": "Belgique", "CH": "Suisse", "US": "États-Unis",
+             "GB": "Royaume-Uni", "AU": "Australie", "IE": "Irlande", "IN": "Inde", "NG": "Nigeria", "KE": "Kenya",
+             "ZA": "Afrique du Sud", "TZ": "Tanzanie", "NZ": "Nouvelle-Zélande", "PH": "Philippines",
+             "SG": "Singapour", "HK": "Hong Kong", "ES": "Espagne", "MX": "Mexique", "AR": "Argentine",
+             "CO": "Colombie", "CL": "Chili", "PE": "Pérou", "VE": "Venezuela", "CU": "Cuba", "BR": "Brésil",
+             "PT": "Portugal", "DE": "Allemagne", "AT": "Autriche", "IT": "Italie", "NL": "Pays-Bas",
+             "SA": "Arabie saoudite", "EG": "Égypte", "MA": "Maroc", "DZ": "Algérie", "TN": "Tunisie",
+             "AE": "Émirats", "LB": "Liban", "JO": "Jordanie", "TR": "Turquie", "RU": "Russie", "CN": "Chine",
+             "TW": "Taïwan", "JP": "Japon", "KR": "Corée du Sud", "PL": "Pologne", "RO": "Roumanie", "UA": "Ukraine",
+             "SE": "Suède", "NO": "Norvège", "DK": "Danemark", "FI": "Finlande", "GR": "Grèce", "IL": "Israël",
+             "ID": "Indonésie", "MY": "Malaisie", "VN": "Viêt Nam", "TH": "Thaïlande", "ET": "Éthiopie",
+             "SO": "Somalie", "PK": "Pakistan", "BD": "Bangladesh", "IR": "Iran", "CZ": "Tchéquie",
+             "HU": "Hongrie", "BG": "Bulgarie", "HR": "Croatie", "RS": "Serbie", "SK": "Slovaquie"}
+# caractères lus par seconde à vitesse normale (point de départ ; corrigé en mesurant la vraie voix)
+DUB_CPS_BY = {"fr": 14.5, "en": 15, "es": 15.5, "pt": 15, "it": 15, "de": 14, "nl": 14, "ar": 12, "tr": 13.5,
+              "ru": 13.5, "uk": 13.5, "pl": 13.5, "ro": 14, "zh": 5.5, "ja": 7.5, "ko": 6.5, "hi": 12, "vi": 12,
+              "th": 11, "he": 12, "fa": 12, "am": 9, "el": 14, "sv": 14, "sw": 13, "id": 14}
 DUB_MAX_S = 3 * 3600
+# voix de secours si la liste de Microsoft ne répond pas (la vraie liste complète est chargée au démarrage)
+DUB_FALLBACK = [
+    ("fr-FR-HenriNeural", "Male"), ("fr-FR-DeniseNeural", "Female"), ("fr-FR-RemyMultilingualNeural", "Male"),
+    ("fr-FR-VivienneMultilingualNeural", "Female"), ("fr-CA-AntoineNeural", "Male"), ("fr-CA-SylvieNeural", "Female"),
+    ("fr-BE-GerardNeural", "Male"), ("fr-CH-ArianeNeural", "Female"),
+    ("en-US-AndrewMultilingualNeural", "Male"), ("en-US-AvaMultilingualNeural", "Female"),
+    ("en-US-GuyNeural", "Male"), ("en-US-JennyNeural", "Female"), ("en-GB-RyanNeural", "Male"),
+    ("en-GB-SoniaNeural", "Female"), ("es-ES-AlvaroNeural", "Male"), ("es-ES-ElviraNeural", "Female"),
+    ("es-MX-JorgeNeural", "Male"), ("es-MX-DaliaNeural", "Female"), ("pt-BR-AntonioNeural", "Male"),
+    ("pt-BR-FranciscaNeural", "Female"), ("pt-PT-DuarteNeural", "Male"), ("pt-PT-RaquelNeural", "Female"),
+    ("de-DE-FlorianMultilingualNeural", "Male"), ("de-DE-SeraphinaMultilingualNeural", "Female"),
+    ("de-DE-ConradNeural", "Male"), ("de-DE-KatjaNeural", "Female"), ("it-IT-DiegoNeural", "Male"),
+    ("it-IT-ElsaNeural", "Female"), ("nl-NL-MaartenNeural", "Male"), ("nl-NL-ColetteNeural", "Female"),
+    ("ar-SA-HamedNeural", "Male"), ("ar-SA-ZariyahNeural", "Female"), ("ar-EG-ShakirNeural", "Male"),
+    ("ar-EG-SalmaNeural", "Female"), ("tr-TR-AhmetNeural", "Male"), ("tr-TR-EmelNeural", "Female"),
+    ("ru-RU-DmitryNeural", "Male"), ("ru-RU-SvetlanaNeural", "Female"), ("zh-CN-YunxiNeural", "Male"),
+    ("zh-CN-XiaoxiaoNeural", "Female"), ("ja-JP-KeitaNeural", "Male"), ("ja-JP-NanamiNeural", "Female"),
+    ("ko-KR-InJoonNeural", "Male"), ("ko-KR-SunHiNeural", "Female"), ("hi-IN-MadhurNeural", "Male"),
+    ("hi-IN-SwaraNeural", "Female"), ("sw-KE-RafikiNeural", "Male"), ("sw-KE-ZuriNeural", "Female"),
+    ("pl-PL-MarekNeural", "Male"), ("pl-PL-ZofiaNeural", "Female"), ("ro-RO-EmilNeural", "Male"),
+    ("ro-RO-AlinaNeural", "Female"), ("id-ID-ArdiNeural", "Male"), ("id-ID-GadisNeural", "Female"),
+    ("vi-VN-NamMinhNeural", "Male"), ("vi-VN-HoaiMyNeural", "Female"), ("uk-UA-OstapNeural", "Male"),
+    ("uk-UA-PolinaNeural", "Female"), ("el-GR-NestorasNeural", "Male"), ("el-GR-AthinaNeural", "Female"),
+    ("sv-SE-MattiasNeural", "Male"), ("sv-SE-SofieNeural", "Female"), ("zu-ZA-ThembaNeural", "Male"),
+    ("zu-ZA-ThandoNeural", "Female"), ("am-ET-AmehaNeural", "Male"), ("am-ET-MekdesNeural", "Female")]
+# ordre des langues dans la liste : les plus utiles d'abord, puis l'ordre alphabétique
+DUB_TOP = ["fr", "en", "es", "pt", "de", "it", "ar", "nl", "tr", "ru", "zh", "ja", "ko", "hi", "sw"]
+# pays « principal » de chaque langue : ses voix passent en premier
+DUB_MAIN_LOCALE = {"fr": "fr-FR", "en": "en-US", "es": "es-ES", "pt": "pt-BR", "de": "de-DE", "ar": "ar-SA",
+                   "zh": "zh-CN", "it": "it-IT", "nl": "nl-NL", "sw": "sw-KE"}
+DUB_VOICES = {}      # ShortName → {"lang","locale","gender","name","label"}
+_DUB_VOICES_AT = 0
+OLD_DUB_VOICE = {"henri": "fr-FR-HenriNeural", "denise": "fr-FR-DeniseNeural", "remy": "fr-FR-RemyMultilingualNeural",
+                 "vivienne": "fr-FR-VivienneMultilingualNeural", "antoine": "fr-CA-AntoineNeural",
+                 "sylvie": "fr-CA-SylvieNeural", "gerard": "fr-BE-GerardNeural", "ariane": "fr-CH-ArianeNeural"}
+
+
+def _voice_entry(short, gender):
+    loc = "-".join(short.split("-")[:2])
+    lang = loc.split("-")[0]
+    name = short.split("-", 2)[2].replace("Neural", "").replace("Multilingual", "")
+    region = loc.split("-")[1] if "-" in loc else ""
+    multi = "Multilingual" in short
+    label = (f"{'Homme' if gender == 'Male' else 'Femme'} · {name}"
+             + (f" ({REGION_FR.get(region, region)})" if region else "") + (" · très naturelle" if multi else ""))
+    return {"lang": lang, "locale": loc, "gender": gender, "name": name, "label": label, "multi": multi}
+
+
+def dub_load_voices(force=False):
+    """La liste complète des voix Microsoft (gratuites) ; rechargée au plus une fois par jour."""
+    global _DUB_VOICES_AT
+    if DUB_VOICES and not force and time.time() - _DUB_VOICES_AT < 86400:
+        return DUB_VOICES
+    found = {}
+    try:
+        import asyncio
+        import edge_tts
+        for v in asyncio.run(edge_tts.list_voices()):
+            sn = v.get("ShortName") or ""
+            if sn.count("-") >= 2 and sn.endswith("Neural"):
+                found[sn] = _voice_entry(sn, v.get("Gender") or "")
+    except Exception as e:
+        print(f"Doublage : liste des voix Microsoft indisponible ({str(e)[:100]}) → liste de secours", flush=True)
+    if not found:
+        found = {sn: _voice_entry(sn, g) for sn, g in DUB_FALLBACK}
+    DUB_VOICES.clear()
+    DUB_VOICES.update(found)
+    # liste de secours : on réessaie la vraie liste dans 10 minutes
+    _DUB_VOICES_AT = time.time() if len(found) > len(DUB_FALLBACK) else time.time() - 86400 + 600
+    return DUB_VOICES
+
+
+def dub_lang_list():
+    """[{code, name, voices:[{id,label,gender}]}] trié pour l'écran."""
+    by = {}
+    for sn, v in dub_load_voices().items():
+        by.setdefault(v["lang"], []).append((sn, v))
+    out = []
+    for lang, vs in by.items():
+        main = DUB_MAIN_LOCALE.get(lang, "")
+        vs.sort(key=lambda x: (x[1]["locale"] != main, not x[1]["multi"], x[1]["locale"], x[1]["gender"] != "Male",
+                               x[1]["name"]))
+        out.append({"code": lang, "name": LANG_FR.get(lang, lang.upper()),
+                    "voices": [{"id": sn, "label": v["label"], "gender": v["gender"]} for sn, v in vs]})
+    out.sort(key=lambda x: (DUB_TOP.index(x["code"]) if x["code"] in DUB_TOP else 99, x["name"]))
+    return out
+
+
+def lang_code(x):
+    x = (x or "").strip().lower()
+    if not x:
+        return ""
+    if x in WHISPER_LANG:
+        return WHISPER_LANG[x]
+    return x.split("-")[0].split("_")[0][:3]
 
 
 def yt_video_id(url):
     m = re.search(r"(?:v=|youtu\.be/|shorts/|embed/|live/)([A-Za-z0-9_-]{11})", url or "")
     return m.group(1) if m else ""
+
+
+def url_site(url):
+    return "youtube" if re.search(r"youtu\.?be", url) else "tiktok" if "tiktok" in url else \
+        "facebook" if re.search(r"facebook|fb\.watch", url) else "other"
 
 
 def dub_segments(words):
@@ -3846,34 +3993,50 @@ def dub_segments(words):
             i = k + 1
     for n, sg in enumerate(segs):  # place disponible pour la voix : jusqu'à la phrase suivante
         nxt = segs[n + 1]["s"] if n + 1 < len(segs) else sg["e"] + 1.5
-        sg["slot"] = round(max(sg["e"] - sg["s"], min(nxt - sg["s"], sg["e"] - sg["s"] + 1.2)), 2)
+        sg["slot"] = round(max(sg["e"] - sg["s"], min(nxt - sg["s"] - .05, sg["e"] - sg["s"] + 1.0)), 2)
         sg["n"] = n
     return segs
 
 
+def dub_cps(job):
+    """Vitesse de lecture réelle de la voix choisie (mesurée sur les phrases déjà lues)."""
+    obs = sorted(job.get("cps_obs") or [])
+    if len(obs) >= 4:
+        return obs[len(obs) // 2]
+    return DUB_CPS_BY.get(job["to"], 14)
+
+
 def dub_translate(job, batch, prev):
     """Traduction naturelle, à dire à voix haute, qui tient dans le temps de chaque phrase."""
-    items = [{"i": sg["n"], "texte": sg["src"], "max_caracteres": int(sg["slot"] * DUB_CPS * .95)} for sg in batch]
+    cps = dub_cps(job)
+    to_name = LANG_FR.get(job["to"], job["to"])
+    items = [{"i": sg["n"], "texte": sg["src"], "max_caracteres": max(4, int(sg["slot"] * cps * .93))}
+             for sg in batch]
     ctx = " ".join(p["src"] for p in prev[-3:])
     prompt = (
-        "Tu fais le doublage français d'une vidéo (tutoriel, cours, conférence…). On te donne des phrases parlées, dans "
-        "l'ordre, avec un nombre maximum de caractères pour chacune (c'est le temps disponible pour la voix).\n"
-        "Traduis chaque phrase en français parlé, naturel et clair, comme un bon doubleur : tutoiement si l'orateur "
-        "parle à « you » de façon familière, sinon vouvoiement ; garde les termes techniques, noms de logiciels, de "
-        "boutons, de menus et de fonctions tels qu'ils apparaissent à l'écran (ex. « clique sur Settings ») ; "
-        "chiffres en chiffres. Respecte le maximum de caractères : si besoin, raccourcis sans perdre le sens "
-        "(enlève les répétitions, « euh », « you know », « basically »). Les phrases peuvent être coupées au milieu : "
-        "traduis le morceau tel quel pour que l'enchaînement reste fluide. Ne fusionne jamais deux numéros.\n"
+        f"Tu fais le doublage d'une vidéo en {to_name.lower()} (langue cible, code « {job['to']} »). On te donne "
+        "les phrases parlées, dans l'ordre, avec un nombre maximum de caractères pour chacune : c'est le temps "
+        "exact dont dispose la voix, pour que le doublage reste parfaitement synchronisé avec l'image.\n"
+        f"Traduis chaque phrase en {to_name.lower()} parlé, naturel et fluide, comme un doubleur professionnel "
+        "natif : même ton, même émotion, même registre que l'orateur (familier ou formel, tutoiement/vouvoiement ou "
+        "équivalent selon la langue). Garde les noms propres, marques, noms de logiciels, de boutons et de menus "
+        "tels quels. Chiffres en chiffres. Respecte STRICTEMENT le maximum de caractères : si besoin, raccourcis "
+        "sans perdre le sens (enlève hésitations, répétitions, mots de remplissage). Les phrases peuvent être "
+        "coupées au milieu : traduis le morceau tel quel pour que l'enchaînement reste fluide. Ne fusionne jamais "
+        "deux numéros, n'en saute aucun. Si un morceau est déjà dans la langue cible, reformule-le juste "
+        "naturellement. Écris dans l'écriture normale de la langue cible (ex. alphabet arabe, caractères "
+        "chinois), sans transcription.\n"
         + (f"Contexte juste avant : « {ctx} »\n" if ctx else "")
         + f"Titre de la vidéo : {job.get('title', '')}\n"
         + "Phrases : " + json.dumps(items, ensure_ascii=False)
-        + '\nRéponds en JSON : {"fr": [{"i": 0, "t": "traduction"}]}')
+        + '\nRéponds en JSON : {"tr": [{"i": 0, "t": "traduction"}]}')
     out = {}
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             res = parse_json_obj(groq_chat([{"role": "user", "content": prompt}], max_tokens=6000, json_mode=True,
                                            tag="doublage"))
-            out = {int(x["i"]): str(x.get("t") or "").strip() for x in res.get("fr") or [] if "i" in x}
+            lst = res.get("tr") or res.get("fr") or next((v for v in res.values() if isinstance(v, list)), [])
+            out = {int(x["i"]): str(x.get("t") or "").strip() for x in lst if isinstance(x, dict) and "i" in x}
             if len(out) >= len(batch) * .8:
                 break
         except Exception as e:
@@ -3884,14 +4047,16 @@ def dub_translate(job, batch, prev):
 
 
 def dub_voice(job, sg):
-    """Voix française d'une phrase, à la bonne vitesse pour rester synchronisée."""
+    """Voix d'une phrase, à la vitesse exacte pour finir dans le temps de la phrase d'origine."""
     txt = re.sub(r"\s+", " ", sg.get("fr") or "").strip()
     if not txt or not re.search(r"\w", txt):
         sg["ready"], sg["dur"] = True, 0
         return
     path = os.path.join(job["dir"], f"seg_{sg['n']:05d}.mp3")
-    need = len(txt) / DUB_CPS / max(sg["slot"], .6)
+    cps = dub_cps(job)
+    need = len(txt) / cps / max(sg["slot"], .6)
     rate = int(max(0, min(60, (need - 1) * 100 + 4)))
+    dur = 0
     for attempt in range(2):
         raw = path + ".raw.mp3"
         tts_to_file(txt, job["voice_id"], raw, rate=f"+{rate}%")
@@ -3899,52 +4064,160 @@ def dub_voice(job, sg):
         r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", raw, "-af",
                             "silenceremove=start_periods=1:start_threshold=-42dB:start_silence=0.02,"
                             "areverse,silenceremove=start_periods=1:start_threshold=-42dB:start_silence=0.05,areverse",
-                            "-c:a", "libmp3lame", "-b:a", "64k", path], capture_output=True)
+                            "-c:a", "libmp3lame", "-b:a", "96k", path], capture_output=True)
         if r.returncode != 0 or not os.path.exists(path) or os.path.getsize(path) < 500:
             shutil.move(raw, path)
         elif os.path.exists(raw):
             os.remove(raw)
         dur = probe_duration(path) or 0
-        if dur <= sg["slot"] * 1.08 or rate >= 85:
+        if dur > .4:  # vitesse réelle de cette voix, pour mieux calibrer les phrases suivantes
+            job.setdefault("cps_obs", []).append(len(txt) / dur * 100 / (100 + rate))
+            job["cps_obs"] = job["cps_obs"][-40:]
+        if dur <= sg["slot"] * 1.04 or rate >= 75:
             break
-        rate = int(min(85, (dur / sg["slot"] * (100 + rate)) - 100 + 6))
+        rate = int(min(75, (dur / sg["slot"] * (100 + rate)) - 100 + 5))
+    if dur > sg["slot"] * 1.04:
+        # dernier recours : on accélère juste ce qu'il faut (sans changer la hauteur de la voix)
+        f = min(1.3, dur / sg["slot"])
+        fit = path + ".fit.mp3"
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", path, "-af", f"atempo={f:.3f}", "-c:a", "libmp3lame",
+                            "-b:a", "96k", fit], capture_output=True)
+        if r.returncode == 0 and os.path.exists(fit):
+            os.replace(fit, path)
+            dur = probe_duration(path) or dur / f
     sg["dur"], sg["rate"], sg["ready"] = round(dur, 2), rate, True
 
 
+def dub_probe_info(url):
+    """Titre, durée, miniature et langue parlée d'une vidéo (sans la télécharger, sauf un court extrait si besoin)."""
+    site = url_site(url)
+    with yt_dlp.YoutubeDL(ydl_opts(site, skip_download=True)) as y:
+        info = y.extract_info(url, download=False)
+    if info.get("_type") == "playlist":
+        raise RuntimeError("Colle le lien d'une seule vidéo (pas d'une chaîne ni d'une playlist).")
+    out = {"title": (info.get("title") or info.get("description") or "")[:200], "duration": info.get("duration") or 0,
+           "thumb": info.get("thumbnail") or "", "site": site, "lang": "", "lang_src": ""}
+    lang = lang_code(info.get("language"))
+    if not lang and site == "youtube":
+        auto = [k for k in (info.get("automatic_captions") or {}) if k.endswith("-orig")]
+        if auto:
+            lang = lang_code(auto[0].replace("-orig", ""))
+    if lang:
+        out["lang"], out["lang_src"] = lang, "meta"
+        return out, info
+    # pas d'info : l'IA écoute 30 secondes pour reconnaître la langue
+    if GROQ_KEY:
+        tmp = tempfile.mkdtemp(dir=BASE)
+        try:
+            fmt = next((f for f in reversed(info.get("formats") or [])
+                        if f.get("acodec") not in (None, "none") and f.get("url")), None) or info
+            src = fmt.get("url") or info.get("url")
+            hdr = fmt.get("http_headers") or info.get("http_headers") or {}
+            clip = os.path.join(tmp, "x.mp3")
+            start = 5 if (out["duration"] or 0) > 60 else 0
+            cmd = ["ffmpeg", "-v", "error", "-y"]
+            if hdr:
+                cmd += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in hdr.items())]
+            cmd += ["-ss", str(start), "-t", "30", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", clip]
+            r = subprocess.run(cmd, capture_output=True, timeout=90)
+            if r.returncode != 0 or not os.path.exists(clip):
+                with yt_dlp.YoutubeDL(ydl_opts(site, format="bestaudio/worst/best",
+                                               outtmpl=os.path.join(tmp, "m.%(ext)s"))) as y:
+                    y.extract_info(url, download=True)
+                media = [p for p in glob.glob(os.path.join(tmp, "m.*")) if not p.endswith(".part")]
+                if media:
+                    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", media[0], "-t", "30", "-vn", "-ac", "1",
+                                    "-ar", "16000", "-b:a", "32k", clip], timeout=120)
+            if os.path.exists(clip):
+                meta = {}
+                groq_words(clip, "", meta)
+                out["lang"], out["lang_src"] = lang_code(meta.get("language")), "ia"
+        except Exception as e:
+            print(f"Doublage : langue non détectée ({str(e)[:120]})", flush=True)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return out, info
+
+
+DUB_PROBES = {}
+
+
+@app.post("/api/dub/probe")
+def dub_probe():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    url = ((request.get_json(force=True, silent=True) or {}).get("url") or "").strip()
+    if not re.match(r"https?://", url):
+        return jsonify(error="Colle le lien d'une vidéo."), 400
+    c = DUB_PROBES.get(url)
+    if c and time.time() - c["t"] < 6 * 3600:
+        return jsonify(c["d"])
+    try:
+        out, _ = dub_probe_info(url)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        if re.search(r"private|login|sign in|cookies", msg, re.I):
+            msg = "Cette vidéo est privée ou demande une connexion : Kopi ne peut pas la lire."
+        elif re.search(r"unsupported url|not a valid url", msg, re.I):
+            msg = "Ce lien n'est pas reconnu. Copie le lien de la vidéo elle-même (bouton Partager → Copier le lien)."
+        return jsonify(error=msg[:240]), 400
+    out["lang_name"] = LANG_FR.get(out["lang"], out["lang"].upper()) if out["lang"] else ""
+    DUB_PROBES[url] = {"t": time.time(), "d": out}
+    return jsonify(out)
+
+
+@app.get("/api/dub/langs")
+def dub_langs():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    return jsonify(langs=dub_lang_list())
+
+
 def run_dub_job(job):
-    print(f"[doublage {job['id']}] {job['url']} · voix {job['voice']}", flush=True)
+    print(f"[doublage {job['id']}] {job['url']} → {job['to']} · voix {job['voice_id']} · voix d'origine "
+          f"{job['orig']}", flush=True)
     tmp = os.path.join(job["dir"], "tmp")
     os.makedirs(tmp, exist_ok=True)
+    to_name = LANG_FR.get(job["to"], job["to"])
     try:
         job["phase"] = "transcribing"
         job["step"] = "Lecture de la vidéo…"
         with yt_dlp.YoutubeDL(ydl_opts(job["site"], skip_download=True)) as y:
             info = y.extract_info(job["url"], download=False)
-        job["title"] = (info.get("title") or "")[:200]
+        job["title"] = (info.get("title") or info.get("description") or "")[:200]
         job["source_name"] = job["title"] or job["url"]
         job["duration"] = info.get("duration") or 0
         if job["duration"] and job["duration"] > DUB_MAX_S:
             raise RuntimeError("Vidéo trop longue : 3 heures maximum.")
         job["vid"] = yt_video_id(info.get("webpage_url") or job["url"]) if job["site"] == "youtube" else ""
-        lang = (info.get("language") or "").split("-")[0]
-        if lang == "fr":
-            raise RuntimeError("Cette vidéo est déjà en français.")
-        job["step"] = "Récupération de ce qui est dit (sous-titres ou IA)…"
-        tj = {"id": job["id"], "site": job["site"], "lang": "", "url": job["url"], "msg": ""}
+        src = job.get("src_lang") or lang_code(info.get("language"))
+        if src and src == job["to"]:
+            raise RuntimeError(f"Cette vidéo est déjà en {to_name.lower()}. Choisis une autre langue.")
+        job["step"] = "Écoute de ce qui est dit (sous-titres ou IA)…"
+        tj = {"id": job["id"], "site": job["site"], "lang": src if src and job.get("src_lang") else "",
+              "url": job["url"], "msg": ""}
         words = clip_transcript(tj, info, tmp)
         job["method"] = tj.get("method", "")
+        heard = lang_code(tj.get("language"))
+        if heard:
+            src = heard
+        job["src_lang"] = src
+        if src and src == job["to"]:
+            raise RuntimeError(f"Cette vidéo est déjà en {to_name.lower()}. Choisis une autre langue.")
         segs = dub_segments(words)
         if not segs:
             raise RuntimeError("Aucune parole trouvée dans cette vidéo.")
         job["segs"] = segs
-        print(f"[doublage {job['id']}] {len(segs)} phrases ({job['method']})", flush=True)
+        print(f"[doublage {job['id']}] {len(segs)} phrases ({job['method']}, langue {src or '?'})", flush=True)
         B = 25
         for b0 in range(0, len(segs), B):
             batch = segs[b0:b0 + B]
-            job["step"] = f"Traduction et voix française… {min(len(segs), b0 + B)}/{len(segs)} phrases"
+            job["step"] = f"Traduction et voix ({to_name.lower()})… {min(len(segs), b0 + B)}/{len(segs)} phrases"
             dub_translate(job, batch, segs[max(0, b0 - 3):b0])
+            if b0 == 0:  # la 1re phrase calibre la vitesse réelle de la voix avant les autres
+                dub_voice(job, batch[0])
             with ThreadPoolExecutor(max_workers=3) as ex:
-                list(ex.map(lambda sg: dub_voice(job, sg), batch))
+                list(ex.map(lambda sg: dub_voice(job, sg), [s for s in batch if not s.get("ready")]))
             job["pct"] = round(5 + 95 * min(len(segs), b0 + B) / len(segs), 1)
             if job.get("cancel"):
                 raise RuntimeError("annulé")
@@ -3957,6 +4230,9 @@ def run_dub_job(job):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         job["finished"] = time.time()
+    # hors YouTube il n'y a pas de lecteur à synchroniser : la vidéo doublée est fabriquée tout de suite
+    if job["phase"] == "done" and not job.get("vid"):
+        run_dub_export(job, "mp4")
 
 
 @app.post("/api/dub")
@@ -3969,22 +4245,38 @@ def start_dub():
     url = (d.get("url") or "").strip()
     if not re.match(r"https?://", url):
         return jsonify(error="Colle le lien de la vidéo (YouTube, TikTok, Facebook…)."), 400
-    voice = d.get("voice") if d.get("voice") in DUB_VOICES else "henri"
+    voices = dub_load_voices()
+    voice = d.get("voice") or ""
+    voice = OLD_DUB_VOICE.get(voice, voice)
+    to = lang_code(d.get("to")) or (voices.get(voice) or {}).get("lang") or "fr"
+    if voice not in voices or voices[voice]["lang"] != to:
+        voice = next((v["voices"][0]["id"] for v in dub_lang_list() if v["code"] == to), "")
+    if not voice:
+        return jsonify(error="Aucune voix disponible pour cette langue."), 400
+    orig = "supprimer" if d.get("orig") == "supprimer" else "garder"
+    src = lang_code(d.get("src")) or ((DUB_PROBES.get(url) or {}).get("d") or {}).get("lang") or ""
+    if src and src == to:
+        return jsonify(error=f"Cette vidéo est déjà en {LANG_FR.get(to, to).lower()}. Choisis une autre langue."), 400
     cleanup()
-    # même vidéo et même voix déjà prête ou en cours : on la rouvre directement
+    # même vidéo, même langue, même voix : on rouvre le doublage déjà fait (le choix de la voix d'origine
+    # ne change que l'export, donc on le met juste à jour)
     for j in JOBS.values():
-        if j["platform"] == "dub" and j.get("url") == url and j.get("voice") == voice and j["phase"] != "error":
+        if j["platform"] == "dub" and j.get("url") == url and j.get("voice_id") == voice and j["phase"] != "error":
+            if j.get("orig") != orig and j.get("export_state") != "working":
+                j["orig"] = orig
+                j.pop("export_mp4", None)
+                if j["phase"] == "done" and not j.get("vid"):
+                    threading.Thread(target=run_dub_export, args=(j, "mp4"), daemon=True).start()
             return jsonify(job_id=j["id"])
     if sum(1 for j in JOBS.values() if j["platform"] == "dub" and not j.get("finished")) >= 2:
         return jsonify(error="Deux doublages sont déjà en cours. Attends que l'un se termine."), 409
     jid = uuid.uuid4().hex[:12]
     dd = os.path.join(BASE, "d_" + jid)
     os.makedirs(dd, exist_ok=True)
-    site = "youtube" if re.search(r"youtu\.?be", url) else "tiktok" if "tiktok" in url else \
-        "facebook" if re.search(r"facebook|fb\.watch", url) else "other"
-    job = {"id": jid, "platform": "dub", "source": url, "source_name": url, "url": url, "site": site, "limit": 0,
-           "sort": "", "lang": "", "phase": "queued", "items": [], "error": "", "created": time.time(),
-           "step": "Préparation…", "pct": 2, "dir": dd, "voice": voice, "voice_id": DUB_VOICES[voice], "segs": []}
+    job = {"id": jid, "platform": "dub", "source": url, "source_name": url, "url": url, "site": url_site(url),
+           "limit": 0, "sort": "", "lang": "", "phase": "queued", "items": [], "error": "", "created": time.time(),
+           "step": "Préparation…", "pct": 2, "dir": dd, "voice": voice, "voice_id": voice, "to": to, "orig": orig,
+           "src_lang": src, "segs": [], "orig_vol": .15}
     with LOCK:
         JOBS[jid] = job
     threading.Thread(target=run_dub_job, args=(job,), daemon=True).start()
@@ -4000,10 +4292,14 @@ def dub_status(jid):
         return jsonify(error="Doublage introuvable (le serveur a peut-être redémarré). Recolle le lien."), 404
     since = request.args.get("since", type=int) or 0
     segs = j.get("segs") or []
+    to = j.get("to", "fr")
     return jsonify(phase=j["phase"], error=j["error"], step=j.get("step"), pct=j.get("pct", 0), title=j.get("title", ""),
-                   vid=j.get("vid", ""), site=j["site"], url=j["url"], voice=j["voice"], method=j.get("method", ""),
+                   vid=j.get("vid", ""), site=j["site"], url=j["url"], voice=j["voice_id"], method=j.get("method", ""),
+                   to=to, to_name=LANG_FR.get(to, to), src=j.get("src_lang", ""),
+                   src_name=LANG_FR.get(j.get("src_lang", ""), j.get("src_lang", "")), orig=j.get("orig", "garder"),
                    total=len(segs), ready=sum(1 for s in segs if s.get("ready")), video=j.get("video_state", ""),
                    export=j.get("export_state", ""), export_step=j.get("export_step", ""),
+                   export_kind=j.get("export_kind", ""), has_mp4=bool(j.get("export_mp4")),
                    segs=[{k: sg.get(k) for k in ("n", "s", "e", "slot", "src", "fr", "dur", "ready")} for sg in segs[since:]])
 
 
@@ -4018,10 +4314,9 @@ def dub_seg(jid, n):
     return send_file(p, mimetype="audio/mpeg", max_age=86400)
 
 
-def dub_track(job, out_mp3, orig_media=None, orig_vol=0.15):
-    """Piste française complète (par blocs de 10 min pour rester léger), avec le son d'origine baissé en option."""
+def dub_voice_wav(job, out_wav, sr=48000):
+    """Toutes les phrases doublées posées à leur place exacte (par blocs de 10 min pour rester léger)."""
     import numpy as np
-    sr = 24000
     segs = [s for s in job["segs"] if s.get("dur")]
     total = max([job.get("duration") or 0] + [s["s"] + s["dur"] + .5 for s in segs])
     tmp = os.path.join(job["dir"], "track")
@@ -4047,50 +4342,85 @@ def dub_track(job, out_mp3, orig_media=None, orig_vol=0.15):
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "-",
                         "-c:a", "pcm_s16le", wav], input=np.clip(buf, -1, 1).tobytes(), check=True)
         parts.append(wav)
-        job["export_step"] = f"Voix française : {min(100, int((t0 + block) / max(total, 1) * 100))} %"
+        job["export_step"] = f"Nouvelle voix : {min(100, int((t0 + block) / max(total, 1) * 100))} %"
     lst = os.path.join(tmp, "l.txt")
     open(lst, "w").write("".join(f"file '{p}'\n" for p in parts))
-    voice_wav = os.path.join(tmp, "voix.wav")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", voice_wav],
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", out_wav],
                    check=True)
-    if orig_media:
+    for p in parts:
+        os.remove(p)
+
+
+def dub_track(job, out_audio, orig_media=None):
+    """Piste finale : nouvelle voix + (voix d'origine baissée) ou (musique et bruits sans la voix d'origine)."""
+    tmp = os.path.join(job["dir"], "track")
+    os.makedirs(tmp, exist_ok=True)
+    voice_wav = os.path.join(tmp, "voix.wav")
+    dub_voice_wav(job, voice_wav)
+    enc = ["-c:a", "aac", "-b:a", "192k"] if out_audio.endswith(".m4a") else ["-c:a", "libmp3lame", "-b:a", "160k"]
+    if orig_media and job.get("orig") == "supprimer":
+        bg = job.get("bg_wav")
+        if not bg or not os.path.exists(bg):
+            bg = os.path.join(job["dir"], "fond.m4a")
+
+            def prog(done, total, el):
+                job["export_step"] = f"Suppression de la voix d'origine (musique et bruits gardés) : " \
+                                     f"{int(done / max(total, 1) * 100)} %"
+            job["export_step"] = "Suppression de la voix d'origine (musique et bruits gardés)…"
+            VC.remove_voice(orig_media, job["dir"], bg, progress=prog, heavy=HEAVY,
+                            cancel=lambda: job.get("cancel"))
+            job["bg_wav"] = bg
+        job["export_step"] = "Mixage final…"
+        # le fond baisse un peu quand la nouvelle voix parle (comme dans un vrai doublage)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice_wav, "-i", bg, "-filter_complex",
+                        "[0:a]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[v][sc];"
+                        "[1:a]aformat=sample_rates=48000:channel_layouts=stereo[b];"
+                        "[b][sc]sidechaincompress=threshold=0.02:ratio=4:attack=30:release=500:makeup=1[d];"
+                        "[v][d]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95[a]",
+                        "-map", "[a]"] + enc + [out_audio], check=True)
+    elif orig_media:
+        vol = job.get("orig_vol", .15)
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice_wav, "-i", orig_media, "-filter_complex",
-                        f"[1:a]volume={orig_vol},aresample=24000[o];[0:a][o]amix=inputs=2:duration=longest:normalize=0[a]",
-                        "-map", "[a]", "-c:a", "libmp3lame", "-b:a", "160k", out_mp3], check=True)
+                        f"[1:a]volume={vol},aformat=sample_rates=48000:channel_layouts=stereo[o];"
+                        "[0:a]aformat=sample_rates=48000:channel_layouts=stereo[v];"
+                        "[v][o]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95[a]",
+                        "-map", "[a]"] + enc + [out_audio], check=True)
     else:
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice_wav, "-c:a", "libmp3lame", "-b:a", "128k", out_mp3],
-                       check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice_wav] + enc + [out_audio], check=True)
     shutil.rmtree(tmp, ignore_errors=True)
 
 
 def run_dub_export(job, kind):
+    to_name = LANG_FR.get(job.get("to", "fr"), "doublé").lower()
     try:
-        job["export_state"], job["export_step"] = "working", "Préparation…"
+        job["export_state"], job["export_step"], job["export_kind"] = "working", "Préparation…", kind
         base = safe_name(job.get("title") or "video", 60)
         if kind == "mp3":
-            out = os.path.join(job["dir"], f"{base} - voix française.mp3")
+            out = os.path.join(job["dir"], f"{base} - voix {to_name}.mp3")
             dub_track(job, out)
             job["export_mp3"] = out
         else:
-            job["export_step"] = "Téléchargement de la vidéo…"
             vdir = os.path.join(job["dir"], "v")
             os.makedirs(vdir, exist_ok=True)
-            with yt_dlp.YoutubeDL(ydl_opts(job["site"], format="best[height<=720][ext=mp4]/best[height<=720]/best",
-                                           outtmpl=os.path.join(vdir, "src.%(ext)s"))) as y:
-                y.extract_info(job["url"], download=True)
             media = [p for p in glob.glob(os.path.join(vdir, "src.*")) if not p.endswith(".part")]
             if not media:
+                job["export_step"] = "Téléchargement de la vidéo…"
+                with yt_dlp.YoutubeDL(ydl_opts(job["site"], format="best[height<=720][ext=mp4]/best[height<=720]/best",
+                                               outtmpl=os.path.join(vdir, "src.%(ext)s"))) as y:
+                    y.extract_info(job["url"], download=True)
+                media = [p for p in glob.glob(os.path.join(vdir, "src.*")) if not p.endswith(".part")]
+            if not media:
                 raise RuntimeError("Téléchargement de la vidéo impossible.")
-            track = os.path.join(vdir, "piste.mp3")
-            dub_track(job, track, orig_media=media[0], orig_vol=job.get("orig_vol", .15))
+            track = os.path.join(vdir, "piste.m4a")
+            dub_track(job, track, orig_media=media[0])
             job["export_step"] = "Assemblage de la vidéo…"
-            out = os.path.join(job["dir"], f"{base} - en français.mp4")
+            out = os.path.join(job["dir"], f"{base} - en {to_name}.mp4")
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", media[0], "-i", track, "-map", "0:v:0", "-map", "1:a:0",
-                            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", out],
-                           check=True)
-            shutil.rmtree(vdir, ignore_errors=True)
+                            "-c:v", "copy", "-c:a", "copy", "-shortest", "-movflags", "+faststart", out], check=True)
+            os.remove(track)  # la vidéo source reste : un autre réglage se refait sans retélécharger
             job["export_mp4"] = out
         job["export_state"], job["export_step"] = "done", ""
+        job["downloaded"] = False
     except Exception as e:
         job["export_state"], job["export_step"] = "error", f"Export impossible : {str(e)[:200]}"
         print(f"[doublage {job['id']}] export {kind} : {str(e)[:200]}", flush=True)
@@ -4108,8 +4438,10 @@ def dub_export(jid):
         return jsonify(ok=True)
     d = request.get_json(force=True, silent=True) or {}
     kind = "mp3" if d.get("kind") == "mp3" else "mp4"
+    if d.get("orig") in ("garder", "supprimer"):
+        j["orig"] = d["orig"]
     try:
-        j["orig_vol"] = max(0, min(1, float(d.get("orig_vol", .15))))
+        j["orig_vol"] = max(0, min(1, float(d.get("orig_vol", j.get("orig_vol", .15)))))
     except (TypeError, ValueError):
         j["orig_vol"] = .15
     j["export_kind"] = kind
@@ -4125,7 +4457,12 @@ def dub_file(jid, kind):
     p = j.get("export_mp3" if kind == "mp3" else "export_mp4")
     if not p or not os.path.exists(p):
         return "Fichier introuvable (le serveur a peut-être redémarré).", 404
+    if request.args.get("play") == "1":
+        return send_file(p, mimetype="audio/mpeg" if kind == "mp3" else "video/mp4", conditional=True, max_age=0)
     return send_file(p, as_attachment=True, download_name=os.path.basename(p))
+
+
+threading.Thread(target=dub_load_voices, daemon=True).start()
 
 
 # ------------------------------------------------ nettoyage audio (retirer la musique, garder la voix)
@@ -4700,8 +5037,8 @@ def words_from_json3(raw):
     return clean_words(words)
 
 
-def groq_words(path, lang):
-    """Transcription Whisper avec l'heure de chaque mot."""
+def groq_words(path, lang, meta=None):
+    """Transcription Whisper avec l'heure de chaque mot (meta["language"] = langue entendue)."""
     data = {"model": GROQ_MODEL, "response_format": "verbose_json", "temperature": "0",
             "timestamp_granularities[]": ["word", "segment"]}
     if lang:
@@ -4713,6 +5050,8 @@ def groq_words(path, lang):
                               data=data, files={"file": (os.path.basename(path), f)}, timeout=300)
         if r.status_code == 200:
             j = r.json()
+            if meta is not None and j.get("language") and not meta.get("language"):
+                meta["language"] = j["language"]
             ws = [[w["start"], w["end"], (w.get("word") or "").strip()] for w in j.get("words") or []]
             if not ws:  # pas de mots : on répartit le texte de chaque segment
                 for sg in j.get("segments") or []:

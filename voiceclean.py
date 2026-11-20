@@ -14,6 +14,7 @@ BIN_URL = "https://github.com/Rikorose/DeepFilterNet/releases/download/v0.5.6/de
 SEG = 120        # secondes par morceau
 OVER = 3         # secondes de chevauchement (le modèle « se met en route » au début de chaque morceau)
 SR = 48000
+SEG_BG = 60     # séparation voix/fond : morceaux d'1 min (stéréo en mémoire, on reste léger)
 
 
 def binary():
@@ -106,3 +107,76 @@ def remux_video(video_src, voice_mp3, out_mp4):
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", video_src, "-i", voice_mp3, "-map", "0:v:0", "-map", "1:a:0",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", out_mp4],
                    check=True)
+
+
+def remove_voice(src, workdir, out_audio, progress=None, cancel=None, heavy=None):
+    """Enlève la voix et garde le reste (musique, ambiance, bruits) : fond = original − voix détectée.
+    La voix est isolée par DeepFilterNet (sans post-filtre, pour la retirer au maximum), alignée à
+    l'échantillon près (-D), puis soustraite de chaque canal : la stéréo de la musique est conservée."""
+    exe = binary()
+    if not exe:
+        raise RuntimeError("Le moteur de séparation de la voix n'est pas installé sur le serveur.")
+    total, _ = probe(src)
+    if total <= 0:
+        raise RuntimeError("Impossible de lire le son de cette vidéo.")
+    segdir = os.path.abspath(os.path.join(workdir, "bg"))
+    os.makedirs(segdir, exist_ok=True)
+    t0 = time.time()
+    # le fond est encodé au fil de l'eau (pas de gros fichiers WAV sur le disque, même pour 2 h)
+    enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", "-",
+                            "-c:a", "aac", "-b:a", "192k", out_audio], stdin=subprocess.PIPE)
+    try:
+        _remove_loop(src, segdir, enc, exe, total, progress, cancel, heavy, t0)
+    except BaseException:
+        enc.kill()
+        raise
+    enc.stdin.close()
+    if enc.wait() != 0:
+        raise RuntimeError("Encodage du fond sonore impossible.")
+    shutil.rmtree(segdir, ignore_errors=True)
+    return total
+
+
+def _remove_loop(src, segdir, enc, exe, total, progress, cancel, heavy, t0):
+    import numpy as np
+    k, start = 0, 0.0
+    while start < total - 0.05:
+        if cancel and cancel():
+            raise RuntimeError("annulé")
+        pre = OVER if start > 0 else 0
+        a = start - pre
+        length = min(SEG_BG, total - start) + pre
+        st = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{a:.3f}", "-t", f"{length:.3f}",
+                             "-i", src, "-vn", "-ac", "2", "-ar", str(SR), "-f", "f32le", "-"],
+                            capture_output=True, check=True).stdout
+        orig = np.frombuffer(st, dtype=np.float32).reshape(-1, 2)
+        # mono = moyenne exacte des deux canaux (le mixage mono de ffmpeg baisse le niveau de 3 dB)
+        mono = os.path.join(segdir, f"m_{k:04d}.wav")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", "-",
+                        "-c:a", "pcm_s16le", mono], input=np.ascontiguousarray(orig.mean(1)).tobytes(), check=True)
+        outd = os.path.join(segdir, f"o{k}")
+        if heavy:
+            heavy.acquire()
+        try:
+            r = subprocess.run([exe, "-D", "-o", outd, mono], capture_output=True, text=True)
+        finally:
+            if heavy:
+                heavy.release()
+        res = glob.glob(os.path.join(outd, "*.wav"))
+        if r.returncode != 0 or not res:
+            raise RuntimeError("La séparation de la voix a échoué : " + (r.stderr or "")[-300:])
+        vraw = subprocess.run(["ffmpeg", "-v", "error", "-i", res[0], "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"],
+                              capture_output=True, check=True).stdout
+        voice = np.frombuffer(vraw, dtype=np.float32)
+        if len(voice) < len(orig):  # le modèle rend parfois quelques ms de moins : on complète (aucun décalage)
+            voice = np.concatenate([voice, np.zeros(len(orig) - len(voice), dtype=np.float32)])
+        bg = orig - voice[:len(orig), None]
+        i0 = int(round(pre * SR))
+        bg = bg[i0:]
+        enc.stdin.write(np.clip(bg, -1, 1).astype(np.float32).tobytes())
+        os.remove(mono)
+        shutil.rmtree(outd, ignore_errors=True)
+        start += SEG_BG
+        k += 1
+        if progress:
+            progress(min(start, total), total, time.time() - t0)

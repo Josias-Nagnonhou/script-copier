@@ -4130,8 +4130,9 @@ def dub_probe_info(url):
                                     "-ar", "16000", "-b:a", "32k", clip], timeout=120)
             if os.path.exists(clip):
                 meta = {}
-                groq_words(clip, "", meta)
-                out["lang"], out["lang_src"] = lang_code(meta.get("language")), "ia"
+                ws = groq_words(clip, "", meta)
+                lang = lang_code(meta.get("language")) or detect_lang_text(" ".join(w[2] for w in ws[:120]))
+                out["lang"], out["lang_src"] = lang, "ia"
         except Exception as e:
             print(f"Doublage : langue non détectée ({str(e)[:120]})", flush=True)
         finally:
@@ -4201,6 +4202,57 @@ def dub_langs():
     return jsonify(langs=dub_lang_list())
 
 
+def dub_download_video(job, vdir):
+    """Télécharge la vidéo elle-même (pour la vidéo doublée finale), en essayant plusieurs formats :
+    TikTok refuse parfois un format (erreur 403) mais en accepte un autre."""
+    os.makedirs(vdir, exist_ok=True)
+    have = [p for p in glob.glob(os.path.join(vdir, "src.*")) if not p.endswith(".part")]
+    if have:
+        return have[0]
+    if job["site"] == "tiktok":
+        tries = [dict(format="best[format_note!*=?atermark][vcodec!=?none][acodec!=?none]/best[format_note!*=?atermark]/best",
+                      format_sort=["vcodec:h264"]),
+                 dict(format="best[vcodec!=?none][acodec!=?none]", format_sort=["vcodec:h264"]),
+                 dict(format="best"), dict(format="worst[vcodec!=?none]/worst")]
+    else:
+        tries = [dict(format="best[height<=720][ext=mp4]/best[height<=720]/best"),
+                 dict(format="bv*[height<=720]+ba/b[height<=720]/b", merge_output_format="mp4"),
+                 dict(format="best"), dict(format="worst")]
+    last = None
+    for k, extra in enumerate(tries):
+        for f in glob.glob(os.path.join(vdir, "src.*")):
+            os.remove(f)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts(job["site"], outtmpl=os.path.join(vdir, "src.%(ext)s"), **extra)) as y:
+                y.extract_info(job["url"], download=True)
+            got = [p for p in glob.glob(os.path.join(vdir, "src.*")) if not p.endswith(".part")
+                   and os.path.getsize(p) > 10000]
+            if got:
+                if k:
+                    print(f"[doublage {job['id']}] vidéo récupérée avec le format de secours {k}", flush=True)
+                return got[0]
+        except Exception as e:
+            last = e
+            print(f"[doublage {job['id']}] téléchargement vidéo (essai {k + 1}) : {str(e)[:120]}", flush=True)
+            time.sleep(2)
+    msg = re.sub(r"\x1b\[[0-9;]*m", "", str(last or "")).replace("ERROR: ", "")
+    if "403" in msg:
+        raise RuntimeError("TikTok refuse le téléchargement de cette vidéo pour l'instant. Réessaie dans quelques "
+                           "minutes.")
+    raise RuntimeError("Téléchargement de la vidéo impossible" + (f" : {msg[:150]}" if msg else "."))
+
+
+def detect_lang_text(text):
+    """Langue d'un texte (quand l'écoute ne l'a pas donnée)."""
+    try:
+        r = groq_chat([{"role": "user", "content": "Dans quelle langue est ce texte ? Réponds uniquement le code ISO "
+                        "639-1 en 2 lettres (ex. fr, en, de).\n\n" + text[:600]}], max_tokens=5, tag="langue")
+        m = re.search(r"\b([a-z]{2})\b", (r or "").strip().lower())
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
+
+
 def run_dub_job(job):
     print(f"[doublage {job['id']}] {job['url']} → {job['to']} · voix {job['voice_id']} · voix d'origine "
           f"{job['orig']}", flush=True)
@@ -4224,9 +4276,18 @@ def run_dub_job(job):
         job["step"] = "Écoute de ce qui est dit (sous-titres ou IA)…"
         tj = {"id": job["id"], "site": job["site"], "lang": src if src and job.get("src_lang") else "",
               "url": job["url"], "msg": ""}
-        words = clip_transcript(tj, info, tmp)
+        if job["site"] == "youtube":
+            words = clip_transcript(tj, info, tmp)
+        else:
+            # la vidéo est téléchargée tout de suite (le lien TikTok expire vite) puis l'IA l'écoute
+            job["step"] = "Téléchargement de la vidéo…"
+            media = dub_download_video(job, os.path.join(job["dir"], "v"))
+            job["step"] = "Écoute de ce qui est dit (IA)…"
+            words = clean_words(words_from_media(tj, media, tmp))
+            tj["method"] = "IA"
         job["method"] = tj.get("method", "")
-        heard = lang_code(tj.get("language"))
+        heard = lang_code(tj.get("language")) or (detect_lang_text(" ".join(w[2] for w in words[:150]))
+                                                    if not src and words else "")
         if heard:
             src = heard
         job["src_lang"] = src
@@ -4290,7 +4351,8 @@ def start_dub():
     # ne change que l'export, donc on le met juste à jour)
     for j in JOBS.values():
         if j["platform"] == "dub" and j.get("url") == url and j.get("voice_id") == voice and j["phase"] != "error":
-            if j.get("orig") != orig and j.get("export_state") != "working":
+            redo = j.get("export_state") == "error" and j["phase"] == "done" and not j.get("vid")
+            if (j.get("orig") != orig or redo) and j.get("export_state") != "working":
                 j["orig"] = orig
                 j.pop("export_mp4", None)
                 if j["phase"] == "done" and not j.get("vid"):
@@ -4430,15 +4492,9 @@ def run_dub_export(job, kind):
         else:
             vdir = os.path.join(job["dir"], "v")
             os.makedirs(vdir, exist_ok=True)
-            media = [p for p in glob.glob(os.path.join(vdir, "src.*")) if not p.endswith(".part")]
-            if not media:
+            if not glob.glob(os.path.join(vdir, "src.*")):
                 job["export_step"] = "Téléchargement de la vidéo…"
-                with yt_dlp.YoutubeDL(ydl_opts(job["site"], format="best[height<=720][ext=mp4]/best[height<=720]/best",
-                                               outtmpl=os.path.join(vdir, "src.%(ext)s"))) as y:
-                    y.extract_info(job["url"], download=True)
-                media = [p for p in glob.glob(os.path.join(vdir, "src.*")) if not p.endswith(".part")]
-            if not media:
-                raise RuntimeError("Téléchargement de la vidéo impossible.")
+            media = [dub_download_video(job, vdir)]
             track = os.path.join(vdir, "piste.m4a")
             dub_track(job, track, orig_media=media[0])
             job["export_step"] = "Assemblage de la vidéo…"
@@ -5153,17 +5209,23 @@ def clip_transcript(job, info, tmp):
     media = [p for p in glob.glob(os.path.join(tmp, "media.*")) if not p.endswith(".part")]
     if not media:
         raise RuntimeError("Téléchargement du son impossible.")
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", media[0], "-vn", "-ac", "1", "-ar", "16000",
+    return words_from_media(job, media[0], tmp, keep=False)
+
+
+def words_from_media(job, media, tmp, keep=True):
+    """Mots horodatés d'un fichier audio/vidéo déjà sur le serveur (transcription IA)."""
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", media, "-vn", "-ac", "1", "-ar", "16000",
                     "-b:a", "32k", "-f", "segment", "-segment_time", "600",
                     os.path.join(tmp, "part_%03d.mp3")], check=True)
-    os.remove(media[0])
+    if not keep:
+        os.remove(media)
     parts = sorted(glob.glob(os.path.join(tmp, "part_*.mp3")))
     if not parts:
         raise RuntimeError("Cette vidéo n'a pas de son.")
     words, offset = [], 0.0
     for i, p in enumerate(parts, 1):
         job["msg"] = f"Transcription IA · partie {i}/{len(parts)}"
-        words += [[a + offset, b + offset, w] for a, b, w in groq_words(p, job["lang"])]
+        words += [[a + offset, b + offset, w] for a, b, w in groq_words(p, job["lang"], job)]
         offset += probe_duration(p) or 600
         os.remove(p)
     job["method"] = "IA"

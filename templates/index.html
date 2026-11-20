@@ -318,7 +318,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
 .dbst{margin-top:12px}
 .dbinfo{display:flex;gap:12px;align-items:center;margin-top:12px;padding:10px;border-radius:14px;background:var(--soft)}
 .dbinfo img{width:96px;height:64px;object-fit:cover;border-radius:10px;background:#000;flex:none}
-.dbinfo img[src=""]{display:none}
+.dbinfo img[hidden]{display:none}
 .dbinfo div{min-width:0;display:grid;gap:3px}.dbinfo b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dbinfo span{font-size:13px;color:var(--muted)}.dbinfo span strong{color:var(--ink)}
 .dbopts{margin-top:4px}.dbopts select{width:100%}
@@ -1050,7 +1050,7 @@ dt{color:var(--muted);font-weight:700}dd{margin:0}
       <label for="dbUrl">Lien de la vidéo (TikTok, YouTube, Facebook…)</label>
       <input id="dbUrl" class="dburl" type="url" inputmode="url" placeholder="Colle ici le lien de la vidéo" autocomplete="off">
       <div class="dbinfo" id="dbInfo" hidden>
-        <img id="dbThumb" alt="" referrerpolicy="no-referrer">
+        <img id="dbThumb" alt="" hidden onerror="this.hidden=true">
         <div><b id="dbITitle"></b><span id="dbILang"></span></div>
       </div>
       <div class="grid dbopts">
@@ -1615,9 +1615,9 @@ document.querySelectorAll('#dbOrigMode button').forEach(b=>b.onclick=()=>dbSetOr
 if(dbLS('dubOrig')==='garder')dbSetOrig('garder');
 function dbShowProbe(){
   const box=$('#dbInfo');if(!dbProbeUrl){box.hidden=true;return}box.hidden=false;
-  if(!dbProbe){$('#dbThumb').src='';$('#dbITitle').textContent='Lecture du lien…';$('#dbILang').textContent='Kopi reconnaît la langue parlée…';return}
-  if(dbProbe.error){$('#dbThumb').src='';$('#dbITitle').textContent='Lien illisible';$('#dbILang').textContent=dbProbe.error;return}
-  $('#dbThumb').src=dbProbe.thumb||'';$('#dbITitle').textContent=dbProbe.title||'Vidéo';
+  if(!dbProbe){$('#dbThumb').hidden=true;$('#dbITitle').textContent='Lecture du lien…';$('#dbILang').textContent='Kopi reconnaît la langue parlée…';return}
+  if(dbProbe.error){$('#dbThumb').hidden=true;$('#dbITitle').textContent='Lien illisible';$('#dbILang').textContent=dbProbe.error;return}
+  const th=$('#dbThumb'),tsrc=dbProbe.thumb?'/api/dub/thumb?url='+encodeURIComponent(dbProbeUrl):'';if(th.dataset.s!==tsrc){th.dataset.s=tsrc;th.hidden=!tsrc;if(tsrc)th.src=tsrc}$('#dbITitle').textContent=dbProbe.title||'Vidéo';
   const to=$('#dbTo').value,ln=dbProbe.lang_name;
   $('#dbILang').innerHTML=ln?(dbProbe.lang===to?`Langue parlée : <strong>${esc(ln)}</strong> · ⚠️ la vidéo est déjà dans cette langue, choisis-en une autre`:`Langue parlée détectée : <strong>${esc(ln)}</strong>`+(dbProbe.duration?` · ${fmtT(dbProbe.duration)}`:''))
     :'La langue parlée sera reconnue pendant le doublage'+(dbProbe.duration?` · ${fmtT(dbProbe.duration)}`:'');

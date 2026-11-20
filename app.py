@@ -4166,6 +4166,34 @@ def dub_probe():
     return jsonify(out)
 
 
+@app.get("/api/dub/thumb")
+def dub_thumb():
+    """Miniature de la vidéo, récupérée par le serveur (TikTok bloque l'affichage direct dans une autre page)."""
+    if not authed():
+        return "Non connecté", 401
+    c = DUB_PROBES.get(request.args.get("url") or "") or {}
+    src = (c.get("d") or {}).get("thumb") or ""
+    if not src:
+        return "", 404
+    if "img" not in c:
+        try:
+            r = requests.get(src, timeout=15, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.tiktok.com/"})
+            ok = r.status_code == 200 and r.headers.get("content-type", "").startswith("image/") and len(r.content) < 3e6
+            im = Image.open(io.BytesIO(r.content)).convert("RGB") if ok else None
+            if im:
+                im.thumbnail((320, 320))
+                b = io.BytesIO()
+                im.save(b, "JPEG", quality=82)
+                c["img"] = b.getvalue()
+            else:
+                c["img"] = None
+        except Exception:
+            c["img"] = None
+    if not c.get("img"):
+        return "", 404
+    return send_file(io.BytesIO(c["img"]), mimetype="image/jpeg", max_age=3600)
+
+
 @app.get("/api/dub/langs")
 def dub_langs():
     if not authed():

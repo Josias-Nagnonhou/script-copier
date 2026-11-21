@@ -171,6 +171,22 @@ def install_fb_cookies(text):
     FB.update(status="ok", updated=time.time())
 
 
+IG = {"status": "absent", "updated": None}
+
+
+def valid_ig_cookies(text):
+    lines = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+    return any("instagram.com" in l and len(l.split("\t")) >= 7 and l.split("\t")[5] == "sessionid" for l in lines)
+
+
+def install_ig_cookies(text):
+    p = os.path.join(BASE, "ig_cookies.txt")
+    with open(p, "w") as f:
+        f.write(text if text.startswith("# Netscape") else "# Netscape HTTP Cookie File\n" + text)
+    COOKIES["IG_COOKIES"] = p
+    IG.update(status="ok", updated=time.time())
+
+
 def fb_http():
     """Session HTTP vers Facebook, connectée si des cookies Facebook ont été déposés."""
     sess = requests.Session()
@@ -195,11 +211,15 @@ def load_cookies():
             continue
         if valid_fb_cookies(t):
             install_fb_cookies(t)
+        if valid_ig_cookies(t):
+            install_ig_cookies(t)
         if valid_yt_cookies(t) and YT["status"] != "ok":
             install_yt_cookies(t, "render")
     for k, v in os.environ.items():
         if "COOKIE" in k.upper() and valid_fb_cookies(v) and FB["status"] != "ok":
             install_fb_cookies(v)
+        if "COOKIE" in k.upper() and valid_ig_cookies(v) and IG["status"] != "ok":
+            install_ig_cookies(v)
         if "COOKIE" in k.upper() and "TT" not in k.upper() and valid_yt_cookies(v) and YT["status"] != "ok":
             install_yt_cookies(v, "render")
 
@@ -220,7 +240,8 @@ LOCK = threading.Lock()
 def ydl_opts(platform, **extra):
     o = {"quiet": True, "no_warnings": True, "noprogress": True,
          "socket_timeout": 30, "retries": 3}
-    ck = COOKIES.get({"youtube": "YT_COOKIES", "tiktok": "TT_COOKIES", "facebook": "FB_COOKIES"}.get(platform, ""))
+    ck = COOKIES.get({"youtube": "YT_COOKIES", "tiktok": "TT_COOKIES", "facebook": "FB_COOKIES",
+                      "instagram": "IG_COOKIES"}.get(platform, ""))
     if ck:
         o["cookiefile"] = ck
     o.update(extra)
@@ -600,7 +621,7 @@ def cleanup():
     with LOCK:
         for jid in list(JOBS):
             j = JOBS[jid]
-            keep = {"download": 2, "media": 2, "clip": 3, "montage": 3, "thumb": 12, "dub": 24}.get(j["platform"], 6) * 3600
+            keep = {"download": 2, "media": 2, "social": 3, "clip": 3, "montage": 3, "thumb": 12, "dub": 24}.get(j["platform"], 6) * 3600
             if j.get("finished") and now - j["finished"] > keep:
                 if j.get("file") and os.path.exists(j["file"]):
                     os.remove(j["file"])
@@ -5050,7 +5071,7 @@ def job_full(jid):
 def cookies_status():
     if not authed():
         return jsonify(error="Non connecté"), 401
-    return jsonify(status=YT["status"], source=YT["source"], updated=YT["updated"], fb=FB["status"])
+    return jsonify(status=YT["status"], source=YT["source"], updated=YT["updated"], fb=FB["status"], ig=IG["status"])
 
 
 @app.post("/api/cookies")
@@ -5065,6 +5086,14 @@ def cookies_upload():
           f"1re ligne : {text[:40]!r}", flush=True)
     if text.lstrip().startswith(("[", "{")):
         return jsonify(error="Ce fichier est au format JSON. Dans l'extension, choisis le format « Netscape » puis refais Export."), 400
+    if request.form.get("kind") == "ig" or (any("instagram.com" in l for l in lines)
+                                            and not any("youtube.com" in l for l in lines)
+                                            and not any("facebook.com" in l for l in lines)):
+        if not valid_ig_cookies(text):
+            return jsonify(error="Ce fichier ne contient pas les cookies d'un compte Instagram connecté. Connecte-toi sur "
+                                 "instagram.com, puis refais Export avec l'extension depuis instagram.com."), 400
+        install_ig_cookies(text)
+        return jsonify(status="ok", ig="ok")
     if request.form.get("kind") == "fb" or (any("facebook.com" in l for l in lines) and not any("youtube.com" in l for l in lines)):
         if not valid_fb_cookies(text):
             return jsonify(error="Ce fichier ne contient pas les cookies d'un compte Facebook connecté. Connecte-toi sur "
@@ -5802,6 +5831,243 @@ def ping():
     return "ok"
 
 
+# ---------------------------------------------------------------- Snap & Insta : stories et vidéos sans filigrane
+import social as SOCIAL
+
+
+def ig_extract(url):
+    """Instagram (reel, post, story, highlight) via yt-dlp, avec les cookies du compte si déposés."""
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts("instagram", skip_download=True, ignore_no_formats_error=True)) as y:
+            info = y.extract_info(url, download=False)
+    except Exception as e:
+        msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
+        if re.search(r"login|log in|rate.?limit|not available|cookies|private|401|403|checkpoint", msg, re.I):
+            if IG["status"] == "ok":
+                raise RuntimeError("Instagram refuse l'accès : la story est peut-être privée, expirée, ou tes cookies "
+                                   "Instagram ont expiré (refais l'export et redépose-les).")
+            raise RuntimeError("Instagram demande d'être connecté pour ce lien (les stories en particulier). "
+                               "Connecte Instagram juste en dessous (une seule fois), puis recolle le lien.")
+        if re.search(r"no video|there is no video", msg, re.I):
+            raise RuntimeError("Ce post ne contient que des photos, pas de vidéo.")
+        raise RuntimeError(msg[:220])
+    entries = info.get("entries") if info.get("_type") in ("playlist", "multi_video") else [info]
+    items = []
+    for e in entries or []:
+        if not e:
+            continue
+        fmts = e.get("requested_formats")
+        thumb = e.get("thumbnail") or ""
+        if fmts and len(fmts) > 1:
+            items.append({"kind": "video", "parts": [{"url": f["url"], "headers": f.get("http_headers") or {}}
+                                                     for f in fmts], "thumb": thumb,
+                          "duration": e.get("duration"), "group": "Instagram", "id": str(e.get("id") or "")})
+        elif e.get("url") or fmts:
+            f = fmts[0] if fmts else e
+            vid = (f.get("vcodec") or e.get("vcodec")) not in (None, "none") or (e.get("ext") or "") in ("mp4", "webm")
+            items.append({"kind": "video" if vid else "image", "url": f["url"],
+                          "headers": f.get("http_headers") or e.get("http_headers") or {}, "thumb": thumb,
+                          "duration": e.get("duration"), "group": "Instagram", "id": str(e.get("id") or "")})
+        elif thumb:  # photo seule
+            items.append({"kind": "image", "url": thumb, "headers": {}, "thumb": thumb, "duration": None,
+                          "group": "Instagram", "id": str(e.get("id") or "")})
+    if not items:
+        raise RuntimeError("Kopi ne trouve aucune vidéo sur ce lien Instagram.")
+    title = info.get("uploader") or info.get("channel") or info.get("title") or "Instagram"
+    return title, items
+
+
+def social_fetch(job, i):
+    """Télécharge un média sur le serveur (une seule fois) et renvoie son chemin."""
+    it = job["items"][i]
+    with job["locks"][i]:
+        if it.get("file") and os.path.exists(it["file"]):
+            return it["file"]
+        ext = ".jpg" if it["kind"] == "image" else ".mp4"
+        base = safe_name(f"{job['source_name']} {i + 1:02d}", 60)
+        out = os.path.join(job["dir"], base + ext)
+        hdr = dict(SOCIAL.HEADERS)
+        if it.get("parts"):  # Instagram : vidéo et son séparés → téléchargés puis réunis sans réencoder
+            cmd, tmps = ["ffmpeg", "-v", "error", "-y"], []
+            for k, p in enumerate(it["parts"]):
+                tp = os.path.join(job["dir"], f".part{i}_{k}")
+                with requests.get(p["url"], headers={**hdr, **(p.get("headers") or {})}, stream=True, timeout=60) as r:
+                    if r.status_code != 200:
+                        raise RuntimeError(f"Instagram refuse le fichier (erreur {r.status_code}). Recolle le lien.")
+                    with open(tp, "wb") as f:
+                        for chunk in r.iter_content(1 << 16):
+                            f.write(chunk)
+                tmps.append(tp)
+                cmd += ["-i", tp]
+            cmd += ["-map", "0:v:0", "-map", "1:a:0?", "-c", "copy", "-movflags", "+faststart", out]
+            r = subprocess.run(cmd, capture_output=True, timeout=600)
+            for tp in tmps:
+                os.remove(tp)
+            if r.returncode != 0 or not os.path.exists(out) or os.path.getsize(out) < 10000:
+                raise RuntimeError("Assemblage de la vidéo impossible (le lien a peut-être expiré : recolle-le).")
+        else:
+            hdr.update(it.get("headers") or {})
+            if job["site"] == "snapchat":
+                hdr["Referer"] = "https://www.snapchat.com/"
+            with requests.get(it["url"], headers=hdr, stream=True, timeout=60) as r:
+                if r.status_code != 200:
+                    raise RuntimeError(f"Le serveur de {job['site'].capitalize()} refuse le fichier "
+                                       f"(erreur {r.status_code}). Recolle le lien.")
+                ct = r.headers.get("content-type", "")
+                if "image" in ct:
+                    it["kind"], ext = "image", ".png" if "png" in ct else ".webp" if "webp" in ct else ".jpg"
+                elif "video" in ct or "mp4" in ct:
+                    it["kind"], ext = "video", ".mp4"
+                out = os.path.join(job["dir"], base + ext)
+                size = 0
+                with open(out + ".part", "wb") as f:
+                    for chunk in r.iter_content(1 << 16):
+                        size += len(chunk)
+                        if size > 400 * 1024 * 1024:
+                            raise RuntimeError("Fichier trop lourd (plus de 400 Mo).")
+                        f.write(chunk)
+                if size < 2000:
+                    os.remove(out + ".part")
+                    raise RuntimeError("Le fichier reçu est vide (story expirée ?). Recolle le lien.")
+                os.replace(out + ".part", out)
+        it["file"] = out
+        it["size"] = os.path.getsize(out)
+        return out
+
+
+def run_social_prefetch(job):
+    """Prépare tous les fichiers en arrière-plan : le bouton Télécharger répond tout de suite."""
+    for i in range(len(job["items"])):
+        try:
+            social_fetch(job, i)
+        except Exception as e:
+            job["items"][i]["error"] = str(e)[:200]
+        job["ready"] = sum(1 for it in job["items"] if it.get("file"))
+    job["phase"], job["finished"] = "done", time.time()
+
+
+@app.post("/api/social")
+def social_probe():
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    url = ((request.get_json(force=True, silent=True) or {}).get("url") or "").strip()
+    m = re.search(r"https?://\S+", url)
+    if not m:
+        return jsonify(error="Colle le lien de la story ou de la vidéo (Snapchat ou Instagram)."), 400
+    url = m.group(0).rstrip(").,")
+    cleanup()
+    if SOCIAL.is_snap(url):
+        site = "snapchat"
+    elif re.search(r"instagram\.com|instagr\.am", url, re.I):
+        site = "instagram"
+    else:
+        return jsonify(error="Ce lien n'est ni Snapchat ni Instagram. Pour TikTok, utilise l'onglet TikTok."), 400
+    try:
+        title, items = (SOCIAL.snap_extract(url) if site == "snapchat" else ig_extract(url))
+    except requests.RequestException:
+        return jsonify(error=f"{site.capitalize()} ne répond pas. Réessaie dans un instant."), 502
+    except Exception as e:
+        print(f"[snap-insta] {site} {url} : {str(e)[:160]}", flush=True)
+        return jsonify(error=str(e)[:300]), 400
+    items = items[:60]
+    jid = uuid.uuid4().hex[:12]
+    d = os.path.join(BASE, "sc_" + jid)
+    os.makedirs(d, exist_ok=True)
+    job = {"id": jid, "platform": "social", "site": site, "source": url, "source_name": title or site,
+           "url": url, "phase": "working", "items": items, "error": "", "created": time.time(), "dir": d,
+           "locks": [threading.Lock() for _ in items], "ready": 0, "downloaded": True}
+    with LOCK:
+        JOBS[jid] = job
+    print(f"[snap-insta {jid}] {site} « {title} » : {len(items)} média(s)", flush=True)
+    threading.Thread(target=run_social_prefetch, args=(job,), daemon=True).start()
+    return jsonify(id=jid, site=site, title=title, items=[
+        {"i": k, "kind": it["kind"], "group": it.get("group", ""), "duration": it.get("duration"),
+         "thumb": bool(it.get("thumb"))} for k, it in enumerate(items)])
+
+
+def _social_job(jid):
+    j = JOBS.get(jid)
+    return j if j and j.get("platform") == "social" else None
+
+
+@app.get("/api/social/<jid>")
+def social_status(jid):
+    if not authed():
+        return jsonify(error="Non connecté"), 401
+    j = _social_job(jid)
+    if not j:
+        return jsonify(error="Lien expiré (le serveur a redémarré). Recolle le lien."), 404
+    return jsonify(phase=j["phase"], ready=j.get("ready", 0), items=[
+        {"i": k, "kind": it["kind"], "ok": bool(it.get("file")), "error": it.get("error", ""),
+         "size": it.get("size", 0)} for k, it in enumerate(j["items"])])
+
+
+@app.get("/api/social/<jid>/thumb/<int:i>")
+def social_thumb(jid, i):
+    if not authed():
+        return "Non connecté", 401
+    j = _social_job(jid)
+    if not j or i >= len(j["items"]):
+        return "", 404
+    it = j["items"][i]
+    if "thumb_img" not in it:
+        it["thumb_img"] = None
+        src = it.get("thumb") or (it["url"] if it["kind"] == "image" and it.get("url") else "")
+        if src:
+            try:
+                r = requests.get(src, headers={**SOCIAL.HEADERS, "Referer": "https://www.snapchat.com/"}, timeout=20)
+                im = Image.open(io.BytesIO(r.content)).convert("RGB")
+                im.thumbnail((360, 640))
+                b = io.BytesIO()
+                im.save(b, "JPEG", quality=80)
+                it["thumb_img"] = b.getvalue()
+            except Exception:
+                pass
+    if not it["thumb_img"]:
+        return "", 404
+    return send_file(io.BytesIO(it["thumb_img"]), mimetype="image/jpeg", max_age=3600)
+
+
+@app.get("/api/social/<jid>/file/<int:i>")
+def social_file(jid, i):
+    if not authed():
+        return "Non connecté", 401
+    j = _social_job(jid)
+    if not j or i >= len(j["items"]):
+        return "Lien expiré (le serveur a redémarré). Recolle le lien dans Kopi.", 404
+    try:
+        p = social_fetch(j, i)
+    except Exception as e:
+        return str(e), 502
+    mime = "image/jpeg" if p.endswith(".jpg") else "image/png" if p.endswith(".png") else \
+        "image/webp" if p.endswith(".webp") else "video/mp4"
+    if request.args.get("dl") != "1":
+        return send_file(p, mimetype=mime, conditional=True, max_age=0)
+    return send_file(p, mimetype=mime, as_attachment=True, download_name=os.path.basename(p))
+
+
+@app.get("/api/social/<jid>/zip")
+def social_zip(jid):
+    if not authed():
+        return "Non connecté", 401
+    j = _social_job(jid)
+    if not j:
+        return "Lien expiré (le serveur a redémarré). Recolle le lien dans Kopi.", 404
+    files = []
+    for i in range(len(j["items"])):
+        try:
+            files.append(social_fetch(j, i))
+        except Exception:
+            pass
+    if not files:
+        return "Aucun fichier n'a pu être téléchargé.", 502
+    z = os.path.join(j["dir"], safe_name(j["source_name"], 60) + ".zip")
+    with zipfile.ZipFile(z, "w", zipfile.ZIP_STORED) as zf:
+        for f in files:
+            zf.write(f, os.path.basename(f))
+    return send_file(z, mimetype="application/zip", as_attachment=True, download_name=os.path.basename(z))
+
+
 # ---------------------------------------------------------------- Couverture : remplacer celle d'un ebook existant
 import coverswap as CS
 
@@ -5953,7 +6219,7 @@ def _keepalive():
     url = (os.environ.get("RENDER_EXTERNAL_URL") or "https://kopi-x5eh.onrender.com").rstrip("/") + "/ping"
     while True:
         time.sleep(240)
-        busy = any(j.get("platform") in ("ebook", "kit", "cover", "audio", "clean", "thumb", "dub", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
+        busy = any(j.get("platform") in ("ebook", "kit", "cover", "social", "audio", "clean", "thumb", "dub", "montage", "clip", "scripts", "youtube", "tiktok", "facebook", "audit") and j.get("phase") in ("queued", "transcribing", "listing", "analyzing", "rendering", "downloading", "working")
                    for j in list(JOBS.values())) or any(j.get("export_state") == "working" for j in list(JOBS.values()))
         # un résultat terminé mais pas encore téléchargé : on reste éveillé jusqu'à 6 h pour ne pas le perdre
         waiting = any(j.get("phase") == "done" and not j.get("downloaded") and j.get("finished")

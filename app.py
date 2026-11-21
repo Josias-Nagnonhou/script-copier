@@ -4441,6 +4441,25 @@ def dub_voice_wav(job, out_wav, sr=48000):
         os.remove(p)
 
 
+def dub_duck_envelope(job, out_flac, low=0.3, rate=1000):
+    """Courbe de volume du fond : 1 hors paroles, `low` pendant les paroles (d'origine et doublées), fondus doux."""
+    import numpy as np
+    segs = job.get("segs") or []
+    total = max([job.get("duration") or 0] + [sg["e"] + 1 for sg in segs] +
+                [sg["s"] + (sg.get("dur") or 0) + 1 for sg in segs]) + 2
+    g = np.ones(int(total * rate), np.float32)
+    for sg in segs:
+        a = max(0, int((sg["s"] - .12) * rate))
+        b = min(len(g), int((max(sg["e"], sg["s"] + (sg.get("dur") or 0)) + .18) * rate))
+        if b > a:
+            g[a:b] = low
+    ramp = int(.12 * rate)  # fondus de 120 ms : pas de « pompage » audible
+    k = np.ones(ramp, np.float32) / ramp
+    g = np.convolve(g, k, "same").astype(np.float32)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(rate), "-ac", "1", "-i", "-",
+                    "-c:a", "flac", "-sample_fmt", "s16", out_flac], input=g.tobytes(), check=True)
+
+
 def dub_track(job, out_audio, orig_media=None):
     """Piste finale : nouvelle voix + (voix d'origine baissée) ou (musique et bruits sans la voix d'origine)."""
     tmp = os.path.join(job["dir"], "track")
@@ -4461,12 +4480,16 @@ def dub_track(job, out_audio, orig_media=None):
                             cancel=lambda: job.get("cancel"))
             job["bg_wav"] = bg
         job["export_step"] = "Mixage final…"
-        # le fond baisse un peu quand la nouvelle voix parle (comme dans un vrai doublage)
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice_wav, "-i", bg, "-filter_complex",
-                        "[0:a]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[v][sc];"
+        # pendant que l'orateur d'origine parlait (et pendant la nouvelle voix), le fond est baissé de 10 dB :
+        # le peu de voix d'origine qui pourrait rester disparaît sous la nouvelle voix (comme un vrai doublage)
+        env = os.path.join(tmp, "gain.flac")
+        dub_duck_envelope(job, env)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", voice_wav, "-i", bg, "-i", env, "-filter_complex",
+                        "[0:a]aformat=sample_rates=48000:channel_layouts=stereo[v];"
                         "[1:a]aformat=sample_rates=48000:channel_layouts=stereo[b];"
-                        "[b][sc]sidechaincompress=threshold=0.02:ratio=4:attack=30:release=500:makeup=1[d];"
-                        "[v][d]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95[a]",
+                        "[2:a]aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[g];"
+                        "[b][g]amultiply[d];"
+                        "[v][d]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[a]",
                         "-map", "[a]"] + enc + [out_audio], check=True)
     elif orig_media:
         vol = job.get("orig_vol", .15)
